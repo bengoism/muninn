@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { runInference } from '../../../native/agent-runtime';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
+import type { ObservationResult } from '../../../types/agent';
 import { BrowserChrome } from '../components/BrowserChrome';
 import {
   BrowserWebView,
@@ -28,6 +29,7 @@ import type {
 
 export function BrowserScreen() {
   const browserRef = useRef<BrowserWebViewHandle>(null);
+  const autoObservationRequestedRef = useRef(false);
 
   const requestedUrl = useBrowserStore((state) => state.requestedUrl);
   const currentUrl = useBrowserStore((state) => state.currentUrl);
@@ -81,8 +83,14 @@ export function BrowserScreen() {
 
   const [isRunningSmokeTest, setIsRunningSmokeTest] = useState(false);
   const [isRunningEvaluation, setIsRunningEvaluation] = useState(false);
+  const [isRunningObservation, setIsRunningObservation] = useState(false);
   const [lastEvaluationResult, setLastEvaluationResult] =
     useState<BrowserEvaluationResult | null>(null);
+  const [lastObservationResult, setLastObservationResult] =
+    useState<ObservationResult | null>(null);
+  const [lastObservationError, setLastObservationError] = useState<string | null>(
+    null
+  );
 
   const frames = useMemo(() => Object.values(framesById), [framesById]);
 
@@ -143,11 +151,38 @@ export function BrowserScreen() {
   };
 
   const handleBrowserLoadStart = () => {
+    autoObservationRequestedRef.current = false;
     setProgress(0);
     setNavigationError(null);
+    setLastObservationError(null);
+    setLastObservationResult(null);
     setTelemetryProtocolError(null);
     clearTelemetryState();
   };
+
+  const handleObservePage = useCallback(async () => {
+    try {
+      setIsRunningObservation(true);
+      setLastObservationError(null);
+      setLoopState('observing');
+
+      const result = await browserRef.current?.observe();
+
+      if (!result) {
+        throw new Error('Browser host ref was unavailable.');
+      }
+
+      setLastObservationResult(result);
+      setLoopState('idle');
+    } catch (error) {
+      setLastObservationError(
+        error instanceof Error ? error.message : 'Observation failed.'
+      );
+      setLoopState('failed');
+    } finally {
+      setIsRunningObservation(false);
+    }
+  }, [setLoopState]);
 
   const handleTelemetryMessage = (message: BrowserBridgeMessage) => {
     registerTelemetryMessage(message);
@@ -156,6 +191,31 @@ export function BrowserScreen() {
   const handleTelemetryProtocolError = (error: BrowserBridgeParseError) => {
     setTelemetryProtocolError(error);
   };
+
+  useEffect(() => {
+    if (
+      requestedUrl !== BRIDGE_FIXTURE_URL ||
+      !telemetryReady ||
+      isLoading ||
+      isRunningObservation ||
+      lastObservationResult ||
+      lastObservationError ||
+      autoObservationRequestedRef.current
+    ) {
+      return;
+    }
+
+    autoObservationRequestedRef.current = true;
+    void handleObservePage();
+  }, [
+    handleObservePage,
+    isLoading,
+    isRunningObservation,
+    lastObservationError,
+    lastObservationResult,
+    requestedUrl,
+    telemetryReady,
+  ]);
 
   return (
     <KeyboardAvoidingView
@@ -186,8 +246,8 @@ export function BrowserScreen() {
         >
           <View style={styles.panelHeader}>
             <View>
-              <Text style={styles.eyebrow}>Issue #2 Browser Shell</Text>
-              <Text style={styles.panelTitle}>Instrumentation Console</Text>
+              <Text style={styles.eyebrow}>Issue #3 Observation Pipeline</Text>
+              <Text style={styles.panelTitle}>Observation Console</Text>
             </View>
             <View style={styles.panelPill}>
               <Text style={styles.panelPillText}>{frames.length} frame(s)</Text>
@@ -219,6 +279,12 @@ export function BrowserScreen() {
               }
               onPress={handleEvaluatePageTitle}
             />
+            <DebugButton
+              label={
+                isRunningObservation ? 'Observing page...' : 'Observe page'
+              }
+              onPress={handleObservePage}
+            />
           </View>
 
           <View style={styles.statusGrid}>
@@ -238,11 +304,39 @@ export function BrowserScreen() {
               label="Requested source"
               value={requestedUrl}
             />
+            <StatusCard
+              label="Observation"
+              value={formatObservationHeadline({
+                isRunningObservation,
+                lastObservationError,
+                lastObservationResult,
+              })}
+            />
+            <StatusCard
+              label="Quiescence"
+              value={formatObservationQuiescence(lastObservationResult)}
+            />
           </View>
 
           <StatusCard
             label="Last evaluation"
             value={formatValue(lastEvaluationResult)}
+          />
+          <StatusCard
+            label="Last observation"
+            value={formatObservationSummary(lastObservationResult)}
+          />
+          <StatusCard
+            label="Observation screenshot"
+            value={lastObservationResult?.screenshot.uri ?? 'None'}
+          />
+          <StatusCard
+            label="Observation warnings"
+            value={formatObservationWarnings(lastObservationResult)}
+          />
+          <StatusCard
+            label="Last observation error"
+            value={lastObservationError ?? 'None'}
           />
           <StatusCard
             label="Last telemetry message"
@@ -332,6 +426,55 @@ function formatValue(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function formatObservationSummary(result: ObservationResult | null) {
+  if (!result) {
+    return 'None';
+  }
+
+  return [
+    `${result.axSnapshot.length} node(s)`,
+    `${result.frameSnapshots.length} frame(s)`,
+    `${result.screenshot.width}x${result.screenshot.height} px`,
+    `quiescence ${result.quiescence.waitTimeMs} ms`,
+  ].join(' | ');
+}
+
+function formatObservationWarnings(result: ObservationResult | null) {
+  if (!result || result.warnings.length === 0) {
+    return 'None';
+  }
+
+  return result.warnings.join('\n');
+}
+
+function formatObservationHeadline(input: {
+  isRunningObservation: boolean;
+  lastObservationError: string | null;
+  lastObservationResult: ObservationResult | null;
+}) {
+  if (input.isRunningObservation) {
+    return 'Running';
+  }
+
+  if (input.lastObservationError) {
+    return `Failed: ${input.lastObservationError}`;
+  }
+
+  if (!input.lastObservationResult) {
+    return 'None';
+  }
+
+  return `${input.lastObservationResult.axSnapshot.length} node(s) across ${input.lastObservationResult.frameSnapshots.length} frame(s)`;
+}
+
+function formatObservationQuiescence(result: ObservationResult | null) {
+  if (!result) {
+    return 'None';
+  }
+
+  return `${result.quiescence.waitTimeMs} ms wait | ${result.quiescence.observedFrameCount} frame(s)`;
+}
+
 function mapResponseToLoopState(action: string) {
   if (action === 'yield_to_user') {
     return 'yielded' as const;
@@ -409,6 +552,7 @@ const styles = StyleSheet.create({
   },
   buttonRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
   primaryButton: {

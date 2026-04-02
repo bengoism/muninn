@@ -6,6 +6,7 @@ export type {
   BrowserHostNavigationStatePayload,
   BrowserHostProgressPayload,
   BrowserHostTelemetryPayload,
+  BrowserHostViewportCaptureOutcome,
   BrowserHostViewHandle,
   BrowserHostViewProps,
 } from '../../modules/browser-host';

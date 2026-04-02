@@ -1,3 +1,57 @@
+const NESTED_IFRAME_HTML = `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1"
+    />
+    <title>Muninn Nested Frame</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 14px;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        background: #ecfeff;
+        color: #164e63;
+      }
+
+      button,
+      input {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 10px;
+        border-radius: 10px;
+        border: 1px solid #67e8f9;
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+
+      button {
+        border: 0;
+        background: #06b6d4;
+        color: #083344;
+        font-weight: 800;
+      }
+    </style>
+  </head>
+  <body>
+    <strong>Nested frame controls</strong>
+    <button id="nested-button" type="button">Nested frame action</button>
+    <input
+      id="nested-phone"
+      name="phone"
+      autocomplete="tel"
+      type="tel"
+      value="+1 415 555 0199"
+      placeholder="Nested phone"
+    />
+  </body>
+</html>
+`;
+
 const IFRAME_HTML = `
 <!doctype html>
 <html lang="en">
@@ -20,68 +74,66 @@ const IFRAME_HTML = `
         padding: 16px;
       }
 
+      .card {
+        border-radius: 18px;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background: rgba(255, 255, 255, 0.92);
+        padding: 16px;
+        box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      button,
+      input {
+        border-radius: 10px;
+        border: 1px solid rgba(14, 165, 233, 0.35);
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+
       button {
         border: 0;
-        border-radius: 10px;
         background: #0ea5e9;
         color: #082f49;
-        font-weight: 700;
-        padding: 10px 14px;
+        font-weight: 800;
+      }
+
+      iframe {
+        width: 100%;
+        min-height: 150px;
+        border: 1px solid rgba(125, 211, 252, 0.8);
+        border-radius: 14px;
+        margin-top: 16px;
+        background: #ffffff;
       }
     </style>
   </head>
   <body>
     <div class="frame">
-      <p>Child frame content</p>
-      <button id="frame-button" type="button">Click child frame button</button>
+      <div class="card">
+        <strong>Child frame content</strong>
+        <div class="field">
+          <button id="frame-button" type="button">Child frame action</button>
+          <input
+            id="frame-email"
+            name="email"
+            autocomplete="email"
+            type="email"
+            value="child@example.com"
+            placeholder="Child email"
+          />
+        </div>
+        <iframe
+          title="Muninn Nested Frame"
+          srcdoc="${escapeForHtmlAttribute(NESTED_IFRAME_HTML)}"
+        ></iframe>
+      </div>
     </div>
-    <script>
-      function post(kind, payload) {
-        const target = window.top && window.top.ReactNativeWebView;
-
-        if (!target || typeof target.postMessage !== 'function') {
-          return;
-        }
-
-        target.postMessage(
-          JSON.stringify({
-            channel: 'muninn-browser-bridge',
-            kind,
-            timestamp: new Date().toISOString(),
-            frame: {
-              frameId: 'fixture-child-frame',
-              url: String(window.location.href),
-              title: document.title || null,
-              isTopFrame: false,
-              readyState: document.readyState || null,
-            },
-            payload,
-          })
-        );
-      }
-
-      const button = document.getElementById('frame-button');
-      if (button) {
-        button.addEventListener('click', () => {
-          document.body.setAttribute('data-frame-clicked', 'true');
-          document.title = 'Child Frame Clicked';
-          post('page_event', {
-            event: 'load',
-            detail: {
-              source: 'fixture-child-frame',
-              action: 'button_click',
-            },
-          });
-        });
-      }
-
-      post('bridge_ready', {
-        bridgeVersion: 'fixture-child',
-        readyState: document.readyState || null,
-        reused: false,
-        userAgent: navigator.userAgent,
-      });
-    </script>
   </body>
 </html>
 `;
@@ -99,7 +151,7 @@ export function buildBridgeFixtureHtml() {
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1"
     />
-    <title>Muninn Bridge Fixture</title>
+    <title>Muninn Observation Fixture</title>
     <style>
       :root {
         color-scheme: light;
@@ -115,9 +167,14 @@ export function buildBridgeFixtureHtml() {
       }
 
       main {
-        max-width: 720px;
+        max-width: 760px;
         margin: 0 auto;
         padding: 24px 18px 40px;
+      }
+
+      .layout {
+        display: grid;
+        gap: 18px;
       }
 
       .card {
@@ -129,9 +186,9 @@ export function buildBridgeFixtureHtml() {
         backdrop-filter: blur(12px);
       }
 
-      h1 {
+      h1,
+      h2 {
         margin: 0 0 8px;
-        font-size: 28px;
       }
 
       p {
@@ -147,14 +204,22 @@ export function buildBridgeFixtureHtml() {
       }
 
       button,
+      a.button,
+      input,
+      textarea,
+      select {
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 15px;
+        box-sizing: border-box;
+      }
+
+      button,
       a.button {
         border: 0;
-        border-radius: 12px;
         background: #0ea5e9;
         color: #082f49;
-        font-size: 15px;
         font-weight: 800;
-        padding: 12px 14px;
         text-decoration: none;
         text-align: center;
       }
@@ -173,9 +238,39 @@ export function buildBridgeFixtureHtml() {
         margin-bottom: 18px;
       }
 
+      .grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        font-size: 14px;
+        color: #334155;
+      }
+
+      input,
+      textarea,
+      select {
+        border: 1px solid rgba(148, 163, 184, 0.42);
+        background: rgba(248, 250, 252, 0.92);
+        color: #0f172a;
+      }
+
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+      }
+
+      .shadow-host {
+        min-height: 140px;
+      }
+
       iframe {
         width: 100%;
-        min-height: 140px;
+        min-height: 280px;
         border: 1px solid rgba(148, 163, 184, 0.4);
         border-radius: 16px;
         background: #ffffff;
@@ -184,29 +279,88 @@ export function buildBridgeFixtureHtml() {
   </head>
   <body>
     <main>
-      <div class="card">
-        <h1>Browser Bridge Fixture</h1>
-        <p>
-          This local fixture exercises navigation state, injected scripts, iframe
-          bootstrapping, and script error reporting without relying on a remote site.
-        </p>
+      <div class="layout">
+        <section class="card">
+          <h1>Browser Observation Fixture</h1>
+          <p>
+            This local page exercises viewport capture, quiescence, frame
+            stitching, open shadow roots, and redaction-sensitive form inputs.
+          </p>
 
-        <div class="status">
-          <span id="fixture-status">Status: booting</span>
-          <span id="fixture-title">Title: Muninn Bridge Fixture</span>
-        </div>
+          <div class="status">
+            <span id="fixture-status">Status: booting</span>
+            <span id="fixture-title">Title: Muninn Observation Fixture</span>
+          </div>
 
-        <div class="actions">
-          <button id="title-button" type="button">Update title</button>
-          <button id="throw-button" type="button" class="secondary">Throw sync error</button>
-          <button id="reject-button" type="button" class="secondary">Reject async</button>
-          <a id="hash-link" class="button" href="#fixture-hash">Trigger hashchange</a>
-        </div>
+          <div class="actions">
+            <button id="title-button" type="button">Update title</button>
+            <button id="throw-button" type="button" class="secondary">Throw sync error</button>
+            <button id="reject-button" type="button" class="secondary">Reject async</button>
+            <a id="hash-link" class="button" href="#fixture-hash">Trigger hashchange</a>
+          </div>
+        </section>
 
-        <iframe
-          title="Muninn Fixture Child Frame"
-          srcdoc="${escapeForHtmlAttribute(IFRAME_HTML)}"
-        ></iframe>
+        <section class="card">
+          <h2>Redaction Fields</h2>
+          <div class="grid">
+            <label>
+              Full name
+              <input id="full-name" name="full_name" type="text" value="Ada Lovelace" />
+            </label>
+            <label>
+              Email
+              <input
+                id="email"
+                name="email"
+                autocomplete="email"
+                type="email"
+                value="ada@example.com"
+              />
+            </label>
+            <label>
+              Password
+              <input
+                id="password"
+                name="password"
+                autocomplete="current-password"
+                type="password"
+                value="super-secret-password"
+              />
+            </label>
+            <label>
+              Shipping address
+              <textarea id="address" name="shipping_address">12 Analytical Engine Way</textarea>
+            </label>
+            <label>
+              Destination
+              <select id="destination" name="destination">
+                <option>Paris</option>
+                <option selected>Stockholm</option>
+                <option>Tokyo</option>
+              </select>
+            </label>
+            <label>
+              Search query
+              <input id="search" name="search" type="search" value="best bookstores nearby" />
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Open Shadow Root</h2>
+          <p>The action button and email field below live inside an open shadow root.</p>
+          <div id="shadow-host" class="shadow-host"></div>
+        </section>
+
+        <section class="card">
+          <h2>Iframes</h2>
+          <p>The child frame below includes its own nested frame.</p>
+          <iframe
+            id="fixture-child-frame"
+            title="Muninn Fixture Child Frame"
+            srcdoc="${escapeForHtmlAttribute(IFRAME_HTML)}"
+          ></iframe>
+        </section>
       </div>
     </main>
 
@@ -216,51 +370,11 @@ export function buildBridgeFixtureHtml() {
       const titleButton = document.getElementById('title-button');
       const throwButton = document.getElementById('throw-button');
       const rejectButton = document.getElementById('reject-button');
-      const childFrame = document.querySelector('iframe');
+      const shadowHost = document.getElementById('shadow-host');
 
-      function postChildFrameBridgeReady() {
-        if (
-          !window.ReactNativeWebView ||
-          typeof window.ReactNativeWebView.postMessage !== 'function' ||
-          !childFrame
-        ) {
-          return;
-        }
-
-        const frameWindow = childFrame.contentWindow;
-        const frameDocument = childFrame.contentDocument;
-
-        window.ReactNativeWebView.postMessage(
-          JSON.stringify({
-            channel: 'muninn-browser-bridge',
-            kind: 'bridge_ready',
-            timestamp: new Date().toISOString(),
-            frame: {
-              frameId: 'fixture-child-frame',
-              url: frameWindow ? String(frameWindow.location.href) : 'about:blank',
-              title: frameDocument && frameDocument.title ? frameDocument.title : null,
-              isTopFrame: false,
-              readyState:
-                frameDocument && typeof frameDocument.readyState === 'string'
-                  ? frameDocument.readyState
-                  : null,
-            },
-            payload: {
-              bridgeVersion: 'fixture-parent-proxy',
-              readyState:
-                frameDocument && typeof frameDocument.readyState === 'string'
-                  ? frameDocument.readyState
-                  : null,
-              reused: false,
-              userAgent: navigator.userAgent,
-            },
-          })
-        );
-      }
-
-      function syncLabels() {
+      function syncLabels(label) {
         if (status) {
-          status.textContent = 'Status: ready';
+          status.textContent = 'Status: ' + label;
         }
 
         if (titleLabel) {
@@ -268,10 +382,66 @@ export function buildBridgeFixtureHtml() {
         }
       }
 
+      if (shadowHost && shadowHost.attachShadow) {
+        const shadowRoot = shadowHost.attachShadow({ mode: 'open' });
+        shadowRoot.innerHTML = \`
+          <style>
+            .shell {
+              display: grid;
+              gap: 10px;
+              padding: 18px;
+              border-radius: 16px;
+              background: linear-gradient(135deg, rgba(14, 165, 233, 0.14), rgba(191, 219, 254, 0.55));
+              border: 1px solid rgba(14, 165, 233, 0.2);
+            }
+
+            button,
+            input {
+              border-radius: 12px;
+              padding: 12px 14px;
+              font-size: 14px;
+              box-sizing: border-box;
+            }
+
+            button {
+              border: 0;
+              background: #0284c7;
+              color: #e0f2fe;
+              font-weight: 800;
+            }
+
+            input {
+              border: 1px solid rgba(14, 165, 233, 0.32);
+              background: rgba(255, 255, 255, 0.92);
+              color: #0f172a;
+            }
+          </style>
+          <div class="shell">
+            <button id="shadow-button" type="button">Shadow root action</button>
+            <input
+              id="shadow-email"
+              name="shadow_email"
+              autocomplete="email"
+              type="email"
+              value="shadow@example.com"
+              placeholder="Shadow email"
+            />
+          </div>
+        \`;
+
+        const shadowButton = shadowRoot.getElementById('shadow-button');
+        if (shadowButton) {
+          shadowButton.addEventListener('click', () => {
+            document.title = 'Muninn Observation Fixture Shadow Clicked';
+            syncLabels('shadow-clicked');
+          });
+        }
+      }
+
       if (titleButton) {
         titleButton.addEventListener('click', () => {
-          document.title = 'Muninn Fixture Updated';
-          syncLabels();
+          document.title = 'Muninn Observation Fixture Updated';
+          syncLabels('title-updated');
         });
       }
 
@@ -287,16 +457,18 @@ export function buildBridgeFixtureHtml() {
         });
       }
 
-      if (childFrame) {
-        childFrame.addEventListener('load', postChildFrameBridgeReady);
-      }
-
-      setTimeout(postChildFrameBridgeReady, 700);
+      setTimeout(() => {
+        fetch('data:application/json,%7B%22fixture%22%3Atrue%7D')
+          .then((response) => response.json())
+          .then(() => {
+            syncLabels('network-idle');
+          });
+      }, 180);
 
       setTimeout(() => {
-        document.title = 'Muninn Fixture Ready';
-        syncLabels();
-      }, 350);
+        document.title = 'Muninn Observation Fixture Ready';
+        syncLabels('ready');
+      }, 420);
     </script>
   </body>
 </html>

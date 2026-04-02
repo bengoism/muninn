@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import UIKit
 import WebKit
 
 class BrowserHostView: ExpoView, WKNavigationDelegate {
@@ -136,6 +137,116 @@ class BrowserHostView: ExpoView, WKNavigationDelegate {
       evaluateBlock()
     } else {
       DispatchQueue.main.async(execute: evaluateBlock)
+    }
+  }
+
+  func captureViewport(promise: Promise) {
+    let captureBlock = { [weak self] in
+      guard let self else {
+        promise.resolve([
+          "code": "capture_unavailable",
+          "details": NSNull(),
+          "message": "Browser host view is no longer mounted.",
+          "ok": false
+        ])
+        return
+      }
+
+      guard !self.webView.bounds.isEmpty else {
+        promise.resolve([
+          "code": "capture_unavailable",
+          "details": NSNull(),
+          "message": "Browser viewport has no visible bounds.",
+          "ok": false
+        ])
+        return
+      }
+
+      let configuration = WKSnapshotConfiguration()
+      configuration.rect = self.webView.bounds
+      configuration.afterScreenUpdates = true
+
+      self.webView.takeSnapshot(with: configuration) { image, error in
+        if let error = error as NSError? {
+          promise.resolve([
+            "code": "capture_failed",
+            "details": [
+              "code": error.code,
+              "domain": error.domain,
+              "message": error.localizedDescription
+            ],
+            "message": error.localizedDescription,
+            "ok": false
+          ])
+          return
+        }
+
+        guard let image else {
+          promise.resolve([
+            "code": "capture_failed",
+            "details": NSNull(),
+            "message": "Viewport capture returned no image.",
+            "ok": false
+          ])
+          return
+        }
+
+        guard let imageData = image.pngData() else {
+          promise.resolve([
+            "code": "write_failed",
+            "details": NSNull(),
+            "message": "Viewport capture could not be encoded as PNG.",
+            "ok": false
+          ])
+          return
+        }
+
+        let captureUrl = URL(fileURLWithPath: NSTemporaryDirectory())
+          .appendingPathComponent("muninn-viewport-\(UUID().uuidString).png")
+
+        do {
+          try imageData.write(to: captureUrl, options: [.atomic])
+        } catch {
+          let resolvedError = error as NSError
+
+          promise.resolve([
+            "code": "write_failed",
+            "details": [
+              "code": resolvedError.code,
+              "domain": resolvedError.domain,
+              "message": resolvedError.localizedDescription
+            ],
+            "message": resolvedError.localizedDescription,
+            "ok": false
+          ])
+          return
+        }
+
+        let pointSize = self.webView.bounds.size
+        let scale = self.webView.window?.screen.scale ?? UIScreen.main.scale
+        let interfaceOrientation = self.webView.window?.windowScene?.interfaceOrientation
+        let orientation = interfaceOrientation?.isLandscape == true ? "landscape" : "portrait"
+
+        promise.resolve([
+          "capture": [
+            "capturedAt": ISO8601DateFormatter().string(from: Date()),
+            "height": Int(round(pointSize.height * scale)),
+            "orientation": orientation,
+            "pointHeight": pointSize.height,
+            "pointWidth": pointSize.width,
+            "scale": scale,
+            "uri": captureUrl.absoluteString,
+            "width": Int(round(pointSize.width * scale))
+          ],
+          "ok": true
+        ])
+      }
+    }
+
+    if Thread.isMainThread {
+      captureBlock()
+    } else {
+      DispatchQueue.main.async(execute: captureBlock)
     }
   }
 

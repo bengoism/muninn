@@ -1,3 +1,5 @@
+import type { Bounds } from '../../types/agent';
+
 export type BrowserFixtureId = 'bridge';
 
 export type BrowserFrameMetadata = {
@@ -57,6 +59,47 @@ export type BrowserEvaluationErrorPayload = {
   details: unknown;
 };
 
+export type BrowserObservationStatePayload = {
+  pendingRequestCount: number;
+  lastActivityAt: string;
+  reason: string;
+};
+
+export type BrowserFrameLinkPayload = {
+  childFrameId: string;
+  parentFrameId: string;
+  bounds: Bounds;
+  isVisible: boolean;
+};
+
+export type BrowserAxSnapshotNodePayload = {
+  id: string;
+  role: string;
+  label: string | null;
+  value: string | null;
+  text: string | null;
+  placeholder: string | null;
+  bounds: Bounds;
+  isVisible: boolean;
+  isHidden: boolean;
+  isEnabled: boolean;
+  frameId: string | null;
+  frameUrl: string | null;
+  valueRedacted: boolean;
+  redactionReason: string | null;
+};
+
+export type BrowserAxSnapshotPayload = {
+  requestId: string;
+  nodes: BrowserAxSnapshotNodePayload[];
+  observedAt: string;
+};
+
+export type BrowserAxSnapshotErrorPayload = {
+  requestId: string;
+  message: string;
+};
+
 type BrowserBridgeEnvelopeBase = {
   channel: string;
   timestamp: string;
@@ -88,12 +131,36 @@ export type BrowserEvaluationErrorMessage = BrowserBridgeEnvelopeBase & {
   payload: BrowserEvaluationErrorPayload;
 };
 
+export type BrowserObservationStateMessage = BrowserBridgeEnvelopeBase & {
+  kind: 'observation_state';
+  payload: BrowserObservationStatePayload;
+};
+
+export type BrowserFrameLinkMessage = BrowserBridgeEnvelopeBase & {
+  kind: 'frame_link';
+  payload: BrowserFrameLinkPayload;
+};
+
+export type BrowserAxSnapshotMessage = BrowserBridgeEnvelopeBase & {
+  kind: 'ax_snapshot';
+  payload: BrowserAxSnapshotPayload;
+};
+
+export type BrowserAxSnapshotErrorMessage = BrowserBridgeEnvelopeBase & {
+  kind: 'ax_snapshot_error';
+  payload: BrowserAxSnapshotErrorPayload;
+};
+
 // Untrusted telemetry emitted from page-world JavaScript. Never use this as an
 // authenticity boundary for agent control flow.
 export type BrowserBridgeMessage =
   | BrowserBridgeReadyMessage
   | BrowserPageEventMessage
   | BrowserScriptErrorMessage
+  | BrowserObservationStateMessage
+  | BrowserFrameLinkMessage
+  | BrowserAxSnapshotMessage
+  | BrowserAxSnapshotErrorMessage
   | BrowserEvaluationResultMessage
   | BrowserEvaluationErrorMessage;
 
