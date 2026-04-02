@@ -68,9 +68,21 @@ export function BrowserChrome({
 
   return (
     <View style={styles.container}>
+      <View style={styles.progressTrack}>
+        <View
+          style={[
+            styles.progressBar,
+            {
+              width: progressWidth,
+              opacity: isLoading || progress < 1 ? 1 : 0,
+            },
+          ]}
+        />
+      </View>
+
       <View style={styles.metaRow}>
         <View style={styles.titleBlock}>
-          <Text numberOfLines={1} style={styles.title}>
+          <Text numberOfLines={2} style={styles.title}>
             {title || 'Untitled page'}
           </Text>
           <Text numberOfLines={1} style={styles.subtitle}>
@@ -84,6 +96,12 @@ export function BrowserChrome({
             telemetryReady ? styles.bridgeReady : null,
           ]}
         >
+          <View
+            style={[
+              styles.bridgePillDot,
+              telemetryReady ? styles.bridgePillDotReady : null,
+            ]}
+          />
           <Text style={styles.bridgePillText}>
             {telemetryReady ? 'Telemetry active' : 'Telemetry pending'}
           </Text>
@@ -123,18 +141,6 @@ export function BrowserChrome({
         <BrowserChromeButton label="Reload" onPress={onReload} />
         <BrowserChromeButton label="Fixture" onPress={onLoadFixture} />
       </View>
-
-      <View style={styles.progressTrack}>
-        <View
-          style={[
-            styles.progressBar,
-            {
-              width: progressWidth,
-              opacity: isLoading || progress < 1 ? 1 : 0,
-            },
-          ]}
-        />
-      </View>
     </View>
   );
 }
@@ -167,49 +173,74 @@ function BrowserChromeButton({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#111827',
+    backgroundColor: '#0d1728',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1f2937',
-    paddingHorizontal: 20,
-    paddingTop: 16,
+    borderBottomColor: '#17263b',
+    paddingHorizontal: 18,
+    paddingTop: 12,
     paddingBottom: 14,
-    gap: 12,
+    gap: 14,
+  },
+  progressTrack: {
+    backgroundColor: '#10203a',
+    borderRadius: 999,
+    height: 4,
+    overflow: 'hidden',
   },
   metaRow: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexDirection: 'row',
     gap: 12,
     justifyContent: 'space-between',
   },
   titleBlock: {
     flex: 1,
-    gap: 4,
+    gap: 6,
   },
   title: {
     color: '#f8fafc',
-    fontSize: 21,
+    fontSize: 20,
     fontWeight: '800',
+    letterSpacing: -0.5,
+    lineHeight: 24,
   },
   subtitle: {
-    color: '#94a3b8',
+    color: '#8ca0bd',
     fontFamily: Platform.select({
       ios: 'Menlo',
       android: 'monospace',
       default: 'monospace',
     }),
-    fontSize: 12,
+    fontSize: 11.5,
   },
   bridgePill: {
-    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#10213a',
+    borderColor: '#1e3653',
     borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 34,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  bridgePillDot: {
+    backgroundColor: '#64748b',
+    borderRadius: 999,
+    height: 8,
+    width: 8,
+  },
   bridgeReady: {
-    backgroundColor: '#082f49',
+    backgroundColor: '#0d3050',
+    borderColor: '#1f5f8b',
+  },
+  bridgePillDotReady: {
+    backgroundColor: '#38bdf8',
   },
   bridgePillText: {
-    color: '#cbd5e1',
+    color: '#dbeafe',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -219,8 +250,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   addressInput: {
-    backgroundColor: '#0f172a',
-    borderRadius: 14,
+    backgroundColor: '#0f1b2e',
+    borderColor: '#1e3653',
+    borderRadius: 16,
+    borderWidth: 1,
     color: '#f8fafc',
     flex: 1,
     fontSize: 15,
@@ -229,8 +262,8 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     alignItems: 'center',
-    backgroundColor: '#0ea5e9',
-    borderRadius: 14,
+    backgroundColor: '#38bdf8',
+    borderRadius: 16,
     justifyContent: 'center',
     minWidth: 64,
     paddingHorizontal: 14,
@@ -247,8 +280,10 @@ const styles = StyleSheet.create({
   },
   controlButton: {
     alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
+    backgroundColor: '#162235',
+    borderColor: '#22354f',
+    borderRadius: 14,
+    borderWidth: 1,
     flex: 1,
     justifyContent: 'center',
     paddingVertical: 10,
@@ -263,12 +298,6 @@ const styles = StyleSheet.create({
     color: '#e2e8f0',
     fontSize: 13,
     fontWeight: '700',
-  },
-  progressTrack: {
-    backgroundColor: '#0f172a',
-    borderRadius: 999,
-    height: 4,
-    overflow: 'hidden',
   },
   progressBar: {
     backgroundColor: '#38bdf8',
