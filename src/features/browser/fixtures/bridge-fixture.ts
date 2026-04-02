@@ -87,6 +87,7 @@ const IFRAME_HTML = `
 `;
 
 export const BRIDGE_FIXTURE_URL = 'fixture://bridge';
+export const BRIDGE_FIXTURE_BASE_URL = 'https://fixture.muninn.local/';
 
 export function buildBridgeFixtureHtml() {
   return `

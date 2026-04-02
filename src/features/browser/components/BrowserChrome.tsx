@@ -12,7 +12,7 @@ import { BRIDGE_FIXTURE_URL } from '../fixtures/bridge-fixture';
 import { normalizeBrowserUrl } from '../utils/url';
 
 type BrowserChromeProps = {
-  bridgeReady: boolean;
+  telemetryReady: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   currentUrl: string;
@@ -28,7 +28,7 @@ type BrowserChromeProps = {
 };
 
 export function BrowserChrome({
-  bridgeReady,
+  telemetryReady,
   canGoBack,
   canGoForward,
   currentUrl,
@@ -78,9 +78,14 @@ export function BrowserChrome({
           </Text>
         </View>
 
-        <View style={[styles.bridgePill, bridgeReady ? styles.bridgeReady : null]}>
+        <View
+          style={[
+            styles.bridgePill,
+            telemetryReady ? styles.bridgeReady : null,
+          ]}
+        >
           <Text style={styles.bridgePillText}>
-            {bridgeReady ? 'Bridge ready' : 'Bridge pending'}
+            {telemetryReady ? 'Telemetry active' : 'Telemetry pending'}
           </Text>
         </View>
       </View>

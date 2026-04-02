@@ -38,7 +38,7 @@ export type BrowserBridgeReadyPayload = {
 };
 
 export type BrowserEvaluationErrorType =
-  | 'bridge_unavailable'
+  | 'native_unavailable'
   | 'timeout'
   | 'execution_error'
   | 'serialization_error'
@@ -88,6 +88,8 @@ export type BrowserEvaluationErrorMessage = BrowserBridgeEnvelopeBase & {
   payload: BrowserEvaluationErrorPayload;
 };
 
+// Untrusted telemetry emitted from page-world JavaScript. Never use this as an
+// authenticity boundary for agent control flow.
 export type BrowserBridgeMessage =
   | BrowserBridgeReadyMessage
   | BrowserPageEventMessage
@@ -121,7 +123,7 @@ export type BrowserEvaluationSuccess<T = unknown> = {
   ok: true;
   requestId: string;
   value: T;
-  frame: BrowserFrameMetadata;
+  frame?: BrowserFrameMetadata;
   elapsedMs: number;
 };
 

@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 
 import { DEFAULT_BROWSER_URL } from '../config/runtime';
+import {
+  BRIDGE_FIXTURE_BASE_URL,
+  BRIDGE_FIXTURE_URL,
+} from '../features/browser/fixtures/bridge-fixture';
 import type {
   BrowserBridgeMessage,
   BrowserBridgeParseError,
@@ -18,20 +22,20 @@ type BrowserState = {
   isLoading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
-  bridgeReady: boolean;
+  telemetryReady: boolean;
   mainFrameId: string | null;
   frames: Record<string, BrowserFrameMetadata>;
   lastNavigationError: BrowserNavigationError | null;
   lastScriptError: BrowserScriptErrorMessage | null;
-  lastBridgeProtocolError: BrowserBridgeParseError | null;
-  lastBridgeMessage: BrowserBridgeMessage | null;
+  lastTelemetryProtocolError: BrowserBridgeParseError | null;
+  lastTelemetryMessage: BrowserBridgeMessage | null;
   setRequestedUrl: (url: string) => void;
   applyNavigationState: (navigationState: BrowserNavigationStateSnapshot) => void;
   setProgress: (progress: number) => void;
   setNavigationError: (error: BrowserNavigationError | null) => void;
-  clearBridgeState: () => void;
-  registerBridgeMessage: (message: BrowserBridgeMessage) => void;
-  setBridgeProtocolError: (error: BrowserBridgeParseError | null) => void;
+  clearTelemetryState: () => void;
+  registerTelemetryMessage: (message: BrowserBridgeMessage) => void;
+  setTelemetryProtocolError: (error: BrowserBridgeParseError | null) => void;
 };
 
 export const useBrowserStore = create<BrowserState>((set) => ({
@@ -42,27 +46,32 @@ export const useBrowserStore = create<BrowserState>((set) => ({
   isLoading: true,
   canGoBack: false,
   canGoForward: false,
-  bridgeReady: false,
+  telemetryReady: false,
   mainFrameId: null,
   frames: {},
   lastNavigationError: null,
   lastScriptError: null,
-  lastBridgeProtocolError: null,
-  lastBridgeMessage: null,
+  lastTelemetryProtocolError: null,
+  lastTelemetryMessage: null,
   setRequestedUrl: (requestedUrl) =>
     set({
       requestedUrl,
       lastNavigationError: null,
     }),
   applyNavigationState: (navigationState) =>
-    set({
+    set((state) => ({
+      requestedUrl:
+        state.requestedUrl === BRIDGE_FIXTURE_URL &&
+        navigationState.url.startsWith(BRIDGE_FIXTURE_BASE_URL)
+          ? BRIDGE_FIXTURE_URL
+          : navigationState.url,
       currentUrl: navigationState.url,
       title: navigationState.title,
       isLoading: navigationState.isLoading,
       canGoBack: navigationState.canGoBack,
       canGoForward: navigationState.canGoForward,
       lastNavigationError: null,
-    }),
+    })),
   setProgress: (progress) =>
     set({
       progress,
@@ -72,25 +81,26 @@ export const useBrowserStore = create<BrowserState>((set) => ({
     set({
       lastNavigationError,
     }),
-  clearBridgeState: () =>
+  clearTelemetryState: () =>
     set({
-      bridgeReady: false,
+      telemetryReady: false,
       mainFrameId: null,
       frames: {},
-      lastBridgeMessage: null,
+      lastTelemetryMessage: null,
       lastScriptError: null,
-      lastBridgeProtocolError: null,
+      lastTelemetryProtocolError: null,
     }),
-  registerBridgeMessage: (message) =>
+  registerTelemetryMessage: (message) =>
     set((state) => {
       const frames = {
         ...state.frames,
         [message.frame.frameId]: message.frame,
       };
 
-      const bridgeReady = message.kind === 'bridge_ready' && message.frame.isTopFrame
+      const telemetryReady =
+        message.kind === 'bridge_ready' && message.frame.isTopFrame
         ? true
-        : state.bridgeReady;
+        : state.telemetryReady;
       const mainFrameId =
         message.frame.isTopFrame && message.kind === 'bridge_ready'
           ? message.frame.frameId
@@ -98,15 +108,15 @@ export const useBrowserStore = create<BrowserState>((set) => ({
 
       return {
         frames,
-        bridgeReady,
+        telemetryReady,
         mainFrameId,
         lastScriptError:
           message.kind === 'script_error' ? message : state.lastScriptError,
-        lastBridgeMessage: message,
+        lastTelemetryMessage: message,
       };
     }),
-  setBridgeProtocolError: (lastBridgeProtocolError) =>
+  setTelemetryProtocolError: (lastTelemetryProtocolError) =>
     set({
-      lastBridgeProtocolError,
+      lastTelemetryProtocolError,
     }),
 }));

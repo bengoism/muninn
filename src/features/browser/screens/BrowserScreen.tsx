@@ -36,16 +36,18 @@ export function BrowserScreen() {
   const isLoading = useBrowserStore((state) => state.isLoading);
   const canGoBack = useBrowserStore((state) => state.canGoBack);
   const canGoForward = useBrowserStore((state) => state.canGoForward);
-  const bridgeReady = useBrowserStore((state) => state.bridgeReady);
+  const telemetryReady = useBrowserStore((state) => state.telemetryReady);
   const framesById = useBrowserStore((state) => state.frames);
   const lastNavigationError = useBrowserStore(
     (state) => state.lastNavigationError
   );
   const lastScriptError = useBrowserStore((state) => state.lastScriptError);
-  const lastBridgeProtocolError = useBrowserStore(
-    (state) => state.lastBridgeProtocolError
+  const lastTelemetryProtocolError = useBrowserStore(
+    (state) => state.lastTelemetryProtocolError
   );
-  const lastBridgeMessage = useBrowserStore((state) => state.lastBridgeMessage);
+  const lastTelemetryMessage = useBrowserStore(
+    (state) => state.lastTelemetryMessage
+  );
   const setRequestedUrl = useBrowserStore((state) => state.setRequestedUrl);
   const applyNavigationState = useBrowserStore(
     (state) => state.applyNavigationState
@@ -54,12 +56,14 @@ export function BrowserScreen() {
   const setNavigationError = useBrowserStore(
     (state) => state.setNavigationError
   );
-  const clearBridgeState = useBrowserStore((state) => state.clearBridgeState);
-  const registerBridgeMessage = useBrowserStore(
-    (state) => state.registerBridgeMessage
+  const clearTelemetryState = useBrowserStore(
+    (state) => state.clearTelemetryState
   );
-  const setBridgeProtocolError = useBrowserStore(
-    (state) => state.setBridgeProtocolError
+  const registerTelemetryMessage = useBrowserStore(
+    (state) => state.registerTelemetryMessage
+  );
+  const setTelemetryProtocolError = useBrowserStore(
+    (state) => state.setTelemetryProtocolError
   );
 
   const goal = useAgentSessionStore((state) => state.goal);
@@ -128,7 +132,7 @@ export function BrowserScreen() {
         result ?? {
           ok: false,
           requestId: 'browser-host-missing',
-          type: 'bridge_unavailable',
+          type: 'native_unavailable',
           message: 'Browser host ref was unavailable.',
           elapsedMs: 0,
         }
@@ -141,16 +145,16 @@ export function BrowserScreen() {
   const handleBrowserLoadStart = () => {
     setProgress(0);
     setNavigationError(null);
-    setBridgeProtocolError(null);
-    clearBridgeState();
+    setTelemetryProtocolError(null);
+    clearTelemetryState();
   };
 
-  const handleBrowserMessage = (message: BrowserBridgeMessage) => {
-    registerBridgeMessage(message);
+  const handleTelemetryMessage = (message: BrowserBridgeMessage) => {
+    registerTelemetryMessage(message);
   };
 
-  const handleBrowserProtocolError = (error: BrowserBridgeParseError) => {
-    setBridgeProtocolError(error);
+  const handleTelemetryProtocolError = (error: BrowserBridgeParseError) => {
+    setTelemetryProtocolError(error);
   };
 
   return (
@@ -160,7 +164,7 @@ export function BrowserScreen() {
     >
       <SafeAreaView edges={['top']} style={styles.container}>
         <BrowserChrome
-          bridgeReady={bridgeReady}
+          telemetryReady={telemetryReady}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           currentUrl={currentUrl}
@@ -223,8 +227,8 @@ export function BrowserScreen() {
               value={loopState}
             />
             <StatusCard
-              label="Bridge"
-              value={bridgeReady ? 'Ready' : 'Pending'}
+              label="Telemetry"
+              value={telemetryReady ? 'Untrusted events seen' : 'Pending'}
             />
             <StatusCard
               label="Current URL"
@@ -241,16 +245,16 @@ export function BrowserScreen() {
             value={formatValue(lastEvaluationResult)}
           />
           <StatusCard
-            label="Last bridge message"
-            value={formatValue(lastBridgeMessage)}
+            label="Last telemetry message"
+            value={formatValue(lastTelemetryMessage)}
           />
           <StatusCard
             label="Last script error"
             value={formatValue(lastScriptError)}
           />
           <StatusCard
-            label="Last bridge protocol error"
-            value={formatValue(lastBridgeProtocolError)}
+            label="Last telemetry protocol error"
+            value={formatValue(lastTelemetryProtocolError)}
           />
           <StatusCard
             label="Last navigation error"
@@ -268,12 +272,12 @@ export function BrowserScreen() {
 
         <View style={styles.webviewFrame}>
           <BrowserWebView
-            onBridgeMessage={handleBrowserMessage}
-            onBridgeProtocolError={handleBrowserProtocolError}
             onLoadStart={handleBrowserLoadStart}
             onNavigationError={setNavigationError}
             onNavigationStateChange={applyNavigationState}
             onProgressChange={setProgress}
+            onTelemetryMessage={handleTelemetryMessage}
+            onTelemetryProtocolError={handleTelemetryProtocolError}
             ref={browserRef}
             requestedUrl={requestedUrl}
           />

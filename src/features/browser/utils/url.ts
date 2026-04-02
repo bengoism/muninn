@@ -1,5 +1,6 @@
 import { DEFAULT_BROWSER_URL } from '../../../config/runtime';
 import {
+  BRIDGE_FIXTURE_BASE_URL,
   BRIDGE_FIXTURE_URL,
   buildBridgeFixtureHtml,
 } from '../fixtures/bridge-fixture';
@@ -39,7 +40,7 @@ export function resolveBrowserSource(url: string): BrowserSource {
   if (isBridgeFixtureUrl(url)) {
     return {
       html: buildBridgeFixtureHtml(),
-      baseUrl: 'https://fixture.muninn.local/',
+      baseUrl: BRIDGE_FIXTURE_BASE_URL,
     };
   }
 

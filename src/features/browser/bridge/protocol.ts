@@ -74,7 +74,7 @@ function isEvaluationErrorType(
   value: unknown
 ): value is BrowserEvaluationErrorType {
   return (
-    value === 'bridge_unavailable' ||
+    value === 'native_unavailable' ||
     value === 'timeout' ||
     value === 'execution_error' ||
     value === 'serialization_error' ||

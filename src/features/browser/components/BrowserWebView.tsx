@@ -3,24 +3,19 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
 } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
-import WebView from 'react-native-webview';
-import type {
-  WebViewErrorEvent,
-  WebViewHttpErrorEvent,
-  WebViewMessageEvent,
-  WebViewNavigation,
-  WebViewNavigationEvent,
-  WebViewNativeEvent,
-  WebViewProgressEvent,
-} from 'react-native-webview/lib/WebViewTypes';
+import { StyleSheet, View } from 'react-native';
 
+import {
+  BrowserHostView,
+  type BrowserHostEvaluationOutcome,
+  type BrowserHostViewHandle as NativeBrowserHostViewHandle,
+} from '../../../native/browser-host';
 import {
   buildBridgeAfterContentScript,
   buildBridgeBootstrapScript,
-  buildBridgeEvaluationScript,
 } from '../bridge/bootstrap';
 import { parseBrowserBridgeMessage } from '../bridge/protocol';
 import type {
@@ -36,21 +31,20 @@ import { resolveBrowserSource } from '../utils/url';
 
 type BrowserWebViewProps = {
   requestedUrl: string;
-  onBridgeMessage?: (message: BrowserBridgeMessage) => void;
-  onBridgeProtocolError?: (error: BrowserBridgeParseError) => void;
   onLoadStart?: () => void;
   onNavigationError?: (error: BrowserNavigationError) => void;
   onNavigationStateChange?: (
     navigationState: BrowserNavigationStateSnapshot
   ) => void;
   onProgressChange?: (progress: number) => void;
+  onTelemetryMessage?: (message: BrowserBridgeMessage) => void;
+  onTelemetryProtocolError?: (error: BrowserBridgeParseError) => void;
 };
 
 export type BrowserWebViewHandle = {
   evaluateJavaScript: <T = unknown>(
     source: string,
     options?: {
-      bridgeReadyTimeoutMs?: number;
       timeoutMs?: number;
     }
   ) => Promise<BrowserEvaluationResult<T>>;
@@ -66,11 +60,6 @@ type PendingEvaluation = {
   timeoutId: ReturnType<typeof setTimeout>;
 };
 
-type BridgeReadyWaiter = {
-  resolve: (ready: boolean) => void;
-  timeoutId: ReturnType<typeof setTimeout>;
-};
-
 const BRIDGE_BOOTSTRAP_SCRIPT = buildBridgeBootstrapScript();
 const BRIDGE_AFTER_CONTENT_SCRIPT = buildBridgeAfterContentScript();
 
@@ -78,46 +67,24 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
   function BrowserWebView(
     {
       requestedUrl,
-      onBridgeMessage,
-      onBridgeProtocolError,
       onLoadStart,
       onNavigationError,
       onNavigationStateChange,
       onProgressChange,
+      onTelemetryMessage,
+      onTelemetryProtocolError,
     },
     ref
   ) {
-    const webViewRef = useRef<WebView>(null);
-    const bridgeReadyRef = useRef(false);
-    const mainFrameRef = useRef<BrowserFrameMetadata | null>(null);
-    const pendingEvaluationsRef = useRef<Map<string, PendingEvaluation>>(
-      new Map()
-    );
-    const bridgeWaitersRef = useRef<BridgeReadyWaiter[]>([]);
+    const hostRef = useRef<NativeBrowserHostViewHandle>(null);
+    const mainTelemetryFrameRef = useRef<BrowserFrameMetadata | null>(null);
+    const pendingEvaluationsRef = useRef<Map<string, PendingEvaluation>>(new Map());
     const requestIdRef = useRef(0);
 
-    const notifyNavigationState = useCallback(
-      (navigationState: WebViewNativeEvent) => {
-        onNavigationStateChange?.({
-          canGoBack: navigationState.canGoBack,
-          canGoForward: navigationState.canGoForward,
-          isLoading: navigationState.loading,
-          title: navigationState.title,
-          url: navigationState.url,
-        });
-      },
-      [onNavigationStateChange]
+    const source = useMemo(
+      () => resolveBrowserSource(requestedUrl),
+      [requestedUrl]
     );
-
-    const resolveBridgeWaiters = useCallback((ready: boolean) => {
-      const waiters = bridgeWaitersRef.current;
-      bridgeWaitersRef.current = [];
-
-      waiters.forEach((waiter) => {
-        clearTimeout(waiter.timeoutId);
-        waiter.resolve(ready);
-      });
-    }, []);
 
     const resolvePendingEvaluation = useCallback(
       (requestId: string, result: BrowserEvaluationResult) => {
@@ -159,99 +126,25 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
       []
     );
 
-    const waitForBridgeReady = useCallback(
-      (timeoutMs: number) => {
-        if (bridgeReadyRef.current) {
-          return Promise.resolve(true);
-        }
+    const handleLoadStart = useCallback(() => {
+      mainTelemetryFrameRef.current = null;
+      failPendingEvaluations(
+        'navigation_changed',
+        'Page navigation interrupted pending evaluation.'
+      );
+      onLoadStart?.();
+    }, [failPendingEvaluations, onLoadStart]);
 
-        return new Promise<boolean>((resolve) => {
-          const timeoutId = setTimeout(() => {
-            bridgeWaitersRef.current = bridgeWaitersRef.current.filter(
-              (waiter) => waiter.timeoutId !== timeoutId
-            );
-            resolve(false);
-          }, timeoutMs);
-
-          bridgeWaitersRef.current.push({
-            resolve,
-            timeoutId,
-          });
-        });
-      },
-      []
-    );
-
-    const handleLoadStart = useCallback(
-      (event: WebViewErrorEvent | WebViewNavigationEvent) => {
-        bridgeReadyRef.current = false;
-        mainFrameRef.current = null;
-        resolveBridgeWaiters(false);
-        failPendingEvaluations(
-          'navigation_changed',
-          'Page navigation interrupted pending evaluation.'
-        );
-        onLoadStart?.();
-        notifyNavigationState(event.nativeEvent);
-      },
-      [failPendingEvaluations, notifyNavigationState, onLoadStart, resolveBridgeWaiters]
-    );
-
-    const handleLoadProgress = useCallback(
-      (event: WebViewProgressEvent) => {
-        onProgressChange?.(event.nativeEvent.progress);
-      },
-      [onProgressChange]
-    );
-
-    const handleLoadEnd = useCallback(
-      (event: WebViewErrorEvent | WebViewNavigationEvent) => {
-        notifyNavigationState(event.nativeEvent);
-      },
-      [notifyNavigationState]
-    );
-
-    const handleNavigationStateChange = useCallback(
-      (navigationState: WebViewNavigation) => {
-        notifyNavigationState(navigationState);
-      },
-      [notifyNavigationState]
-    );
-
-    const handleNavigationError = useCallback(
-      (event: WebViewErrorEvent) => {
-        onNavigationError?.({
-          type: 'navigation_error',
-          code: event.nativeEvent.code,
-          description: event.nativeEvent.description,
-          url: event.nativeEvent.url,
-        });
-      },
-      [onNavigationError]
-    );
-
-    const handleHttpError = useCallback(
-      (event: WebViewHttpErrorEvent) => {
-        onNavigationError?.({
-          type: 'http_error',
-          description: event.nativeEvent.description,
-          statusCode: event.nativeEvent.statusCode,
-          url: event.nativeEvent.url,
-        });
-      },
-      [onNavigationError]
-    );
-
-    const handleBridgeMessage = useCallback(
-      (event: WebViewMessageEvent) => {
-        const parsedMessage = parseBrowserBridgeMessage(event.nativeEvent.data);
+    const handleTelemetryMessage = useCallback(
+      (rawMessage: string) => {
+        const parsedMessage = parseBrowserBridgeMessage(rawMessage);
 
         if (!parsedMessage) {
           return;
         }
 
         if ('type' in parsedMessage) {
-          onBridgeProtocolError?.(parsedMessage);
+          onTelemetryProtocolError?.(parsedMessage);
           return;
         }
 
@@ -259,44 +152,12 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
           parsedMessage.kind === 'bridge_ready' &&
           parsedMessage.frame.isTopFrame
         ) {
-          bridgeReadyRef.current = true;
-          mainFrameRef.current = parsedMessage.frame;
-          resolveBridgeWaiters(true);
+          mainTelemetryFrameRef.current = parsedMessage.frame;
         }
 
-        if (parsedMessage.kind === 'eval_result') {
-          const pending = pendingEvaluationsRef.current.get(parsedMessage.payload.requestId);
-
-          if (pending) {
-            resolvePendingEvaluation(parsedMessage.payload.requestId, {
-              ok: true,
-              requestId: parsedMessage.payload.requestId,
-              value: parsedMessage.payload.value,
-              frame: parsedMessage.frame,
-              elapsedMs: Date.now() - pending.startedAt,
-            });
-          }
-        }
-
-        if (parsedMessage.kind === 'eval_error') {
-          const pending = pendingEvaluationsRef.current.get(parsedMessage.payload.requestId);
-
-          if (pending) {
-            resolvePendingEvaluation(parsedMessage.payload.requestId, {
-              ok: false,
-              requestId: parsedMessage.payload.requestId,
-              type: parsedMessage.payload.code,
-              message: parsedMessage.payload.message,
-              details: parsedMessage.payload.details,
-              frame: parsedMessage.frame,
-              elapsedMs: Date.now() - pending.startedAt,
-            });
-          }
-        }
-
-        onBridgeMessage?.(parsedMessage);
+        onTelemetryMessage?.(parsedMessage);
       },
-      [onBridgeMessage, onBridgeProtocolError, resolveBridgeWaiters, resolvePendingEvaluation]
+      [onTelemetryMessage, onTelemetryProtocolError]
     );
 
     useImperativeHandle(
@@ -305,34 +166,20 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         evaluateJavaScript: async <T = unknown>(
           source: string,
           options?: {
-            bridgeReadyTimeoutMs?: number;
             timeoutMs?: number;
           }
         ) => {
           const requestId = createRequestId(++requestIdRef.current);
-          const bridgeReadyTimeoutMs = options?.bridgeReadyTimeoutMs ?? 2500;
           const timeoutMs = options?.timeoutMs ?? 4000;
           const startedAt = Date.now();
 
-          if (!webViewRef.current) {
+          if (!hostRef.current) {
             return {
               ok: false,
               requestId,
-              type: 'bridge_unavailable',
-              message: 'The browser host is not mounted.',
+              type: 'native_unavailable',
+              message: 'The native browser host is not mounted.',
               elapsedMs: 0,
-            };
-          }
-
-          const bridgeReady = await waitForBridgeReady(bridgeReadyTimeoutMs);
-
-          if (!bridgeReady) {
-            return {
-              ok: false,
-              requestId,
-              type: 'bridge_unavailable',
-              message: 'Timed out waiting for the browser bridge to become ready.',
-              elapsedMs: Date.now() - startedAt,
             };
           }
 
@@ -344,7 +191,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
                 requestId,
                 type: 'timeout',
                 message: `Timed out waiting for JavaScript evaluation after ${timeoutMs}ms.`,
-                frame: mainFrameRef.current ?? undefined,
+                frame: mainTelemetryFrameRef.current ?? undefined,
                 elapsedMs: Date.now() - startedAt,
               });
             }, timeoutMs);
@@ -355,51 +202,91 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
               timeoutId,
             });
 
-            webViewRef.current?.injectJavaScript(
-              buildBridgeEvaluationScript(requestId, source)
-            );
+            hostRef.current
+              ?.evaluateJavaScript(source)
+              .then((result: BrowserHostEvaluationOutcome) => {
+                if (result.ok) {
+                  resolvePendingEvaluation(requestId, {
+                    ok: true,
+                    requestId,
+                    value: result.value as T,
+                    elapsedMs: Date.now() - startedAt,
+                  });
+                  return;
+                }
+
+                resolvePendingEvaluation(requestId, {
+                  ok: false,
+                  requestId,
+                  type: result.code,
+                  message: result.message,
+                  details: result.details,
+                  elapsedMs: Date.now() - startedAt,
+                });
+              })
+              .catch((error: unknown) => {
+                resolvePendingEvaluation(requestId, {
+                  ok: false,
+                  requestId,
+                  type: 'execution_error',
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : 'Native JavaScript evaluation failed.',
+                  details: error,
+                  elapsedMs: Date.now() - startedAt,
+                });
+              });
           });
         },
-        goBack: () => webViewRef.current?.goBack(),
-        goForward: () => webViewRef.current?.goForward(),
-        reload: () => webViewRef.current?.reload(),
-        stopLoading: () => webViewRef.current?.stopLoading(),
+        goBack: () => {
+          hostRef.current?.goBack().catch(() => undefined);
+        },
+        goForward: () => {
+          hostRef.current?.goForward().catch(() => undefined);
+        },
+        reload: () => {
+          hostRef.current?.reload().catch(() => undefined);
+        },
+        stopLoading: () => {
+          hostRef.current?.stopLoading().catch(() => undefined);
+        },
       }),
-      [waitForBridgeReady]
+      [resolvePendingEvaluation]
     );
 
     useEffect(() => {
       return () => {
-        resolveBridgeWaiters(false);
         failPendingEvaluations(
           'navigation_changed',
           'Browser host unmounted before evaluation completed.'
         );
       };
-    }, [failPendingEvaluations, resolveBridgeWaiters]);
+    }, [failPendingEvaluations]);
 
     return (
       <View style={styles.container}>
-        <WebView
-          allowsBackForwardNavigationGestures
-          injectedJavaScript={BRIDGE_AFTER_CONTENT_SCRIPT}
-          injectedJavaScriptBeforeContentLoaded={BRIDGE_BOOTSTRAP_SCRIPT}
-          injectedJavaScriptBeforeContentLoadedForMainFrameOnly={
-            Platform.OS !== 'ios'
-          }
-          injectedJavaScriptForMainFrameOnly={Platform.OS !== 'ios'}
-          javaScriptEnabled
-          originWhitelist={['http://*', 'https://*', 'about:*']}
-          onError={handleNavigationError}
-          onHttpError={handleHttpError}
-          onLoadEnd={handleLoadEnd}
-          onLoadProgress={handleLoadProgress}
+        <BrowserHostView
+          afterContentScript={BRIDGE_AFTER_CONTENT_SCRIPT}
+          bootstrapScript={BRIDGE_BOOTSTRAP_SCRIPT}
+          onLoadProgress={(event) => {
+            onProgressChange?.(event.nativeEvent.progress);
+          }}
           onLoadStart={handleLoadStart}
-          onMessage={handleBridgeMessage}
-          onNavigationStateChange={handleNavigationStateChange}
-          ref={webViewRef}
-          source={resolveBrowserSource(requestedUrl)}
-          style={styles.webView}
+          onNavigationError={(event) => {
+            onNavigationError?.(event.nativeEvent);
+          }}
+          onNavigationStateChange={(event) => {
+            onNavigationStateChange?.(event.nativeEvent);
+          }}
+          onTelemetryMessage={(event) => {
+            handleTelemetryMessage(event.nativeEvent.data);
+          }}
+          ref={hostRef}
+          sourceBaseUrl={'baseUrl' in source ? source.baseUrl ?? null : null}
+          sourceHtml={'html' in source ? source.html : null}
+          sourceUrl={'uri' in source ? source.uri : null}
+          style={styles.host}
         />
       </View>
     );
@@ -415,7 +302,7 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
-  webView: {
+  host: {
     flex: 1,
   },
 });
