@@ -91,6 +91,7 @@ export function BrowserScreen() {
   const [lastObservationError, setLastObservationError] = useState<string | null>(
     null
   );
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const frames = useMemo(() => Object.values(framesById), [framesById]);
 
@@ -248,28 +249,42 @@ export function BrowserScreen() {
             <View>
               <Text style={styles.eyebrow}>Issue #3 Observation Pipeline</Text>
               <Text style={styles.panelTitle}>Observation Console</Text>
+              <Text style={styles.panelSubtitle}>
+                Keep the browser visible while checking loop, telemetry, and
+                observation health.
+              </Text>
             </View>
             <View style={styles.panelPill}>
               <Text style={styles.panelPillText}>{frames.length} frame(s)</Text>
             </View>
           </View>
 
-          <Text style={styles.sectionLabel}>Agent Goal</Text>
-          <TextInput
-            multiline
-            onChangeText={setGoal}
-            placeholder="Describe the browser task to run later."
-            placeholderTextColor="#64748b"
-            style={styles.goalInput}
-            value={goal}
-          />
+          <View style={styles.goalSection}>
+            <Text style={styles.sectionLabel}>Agent Goal</Text>
+            <TextInput
+              multiline
+              onChangeText={setGoal}
+              placeholder="Describe the browser task to run later."
+              placeholderTextColor="#64748b"
+              style={styles.goalInput}
+              value={goal}
+            />
+          </View>
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>Quick Actions</Text>
+            <Text style={styles.sectionCaption}>
+              Fixture observations auto-run once telemetry is ready.
+            </Text>
+          </View>
 
           <View style={styles.buttonRow}>
             <DebugButton
               label={
-                isRunningSmokeTest ? 'Running native stub...' : 'Run native stub'
+                isRunningObservation ? 'Observing page...' : 'Observe page'
               }
-              onPress={handleNativeSmokeTest}
+              onPress={handleObservePage}
+              tone="primary"
             />
             <DebugButton
               label={
@@ -278,90 +293,120 @@ export function BrowserScreen() {
                   : 'Evaluate page title'
               }
               onPress={handleEvaluatePageTitle}
+              tone="secondary"
             />
             <DebugButton
               label={
-                isRunningObservation ? 'Observing page...' : 'Observe page'
+                isRunningSmokeTest ? 'Running native stub...' : 'Run native stub'
               }
-              onPress={handleObservePage}
+              onPress={handleNativeSmokeTest}
+              tone="quiet"
             />
           </View>
 
-          <View style={styles.statusGrid}>
-            <StatusCard
-              label="Loop state"
-              value={loopState}
+          <View style={styles.summaryGrid}>
+            <SummaryCard
+              label="Loop State"
+              meta={currentUrl}
+              value={formatLoopState(loopState)}
             />
-            <StatusCard
-              label="Telemetry"
-              value={telemetryReady ? 'Untrusted events seen' : 'Pending'}
-            />
-            <StatusCard
-              label="Current URL"
-              value={currentUrl}
-            />
-            <StatusCard
-              label="Requested source"
-              value={requestedUrl}
-            />
-            <StatusCard
+            <SummaryCard
               label="Observation"
-              value={formatObservationHeadline({
+              meta={formatObservationMetricMeta({
+                isRunningObservation,
+                lastObservationError,
+                lastObservationResult,
+              })}
+              value={formatObservationMetricValue({
                 isRunningObservation,
                 lastObservationError,
                 lastObservationResult,
               })}
             />
-            <StatusCard
+            <SummaryCard
               label="Quiescence"
-              value={formatObservationQuiescence(lastObservationResult)}
+              meta={formatQuiescenceMetricMeta(lastObservationResult)}
+              value={formatQuiescenceMetricValue(lastObservationResult)}
+            />
+            <SummaryCard
+              label="Telemetry"
+              meta={`${frames.length} frame(s) tracked`}
+              value={telemetryReady ? 'Active' : 'Pending'}
             />
           </View>
 
           <StatusCard
-            label="Last evaluation"
-            value={formatValue(lastEvaluationResult)}
-          />
-          <StatusCard
-            label="Last observation"
+            label="Latest observation"
             value={formatObservationSummary(lastObservationResult)}
           />
-          <StatusCard
-            label="Observation screenshot"
-            value={lastObservationResult?.screenshot.uri ?? 'None'}
-          />
-          <StatusCard
-            label="Observation warnings"
-            value={formatObservationWarnings(lastObservationResult)}
-          />
-          <StatusCard
-            label="Last observation error"
-            value={lastObservationError ?? 'None'}
-          />
-          <StatusCard
-            label="Last telemetry message"
-            value={formatValue(lastTelemetryMessage)}
-          />
-          <StatusCard
-            label="Last script error"
-            value={formatValue(lastScriptError)}
-          />
-          <StatusCard
-            label="Last telemetry protocol error"
-            value={formatValue(lastTelemetryProtocolError)}
-          />
-          <StatusCard
-            label="Last navigation error"
-            value={formatValue(lastNavigationError)}
-          />
-          <StatusCard
-            label="Last native response"
-            value={formatValue(lastNativeResponse)}
-          />
-          <StatusCard
-            label="Last agent error"
-            value={lastAgentError ?? 'None'}
-          />
+
+          <Pressable
+            onPress={() => setShowDiagnostics((current) => !current)}
+            style={({ pressed }) => [
+              styles.diagnosticsToggle,
+              pressed ? styles.diagnosticsTogglePressed : null,
+            ]}
+          >
+            <View style={styles.diagnosticsToggleCopy}>
+              <Text style={styles.sectionLabel}>Detailed Diagnostics</Text>
+              <Text style={styles.diagnosticsToggleHint}>
+                Expanded logs for evaluation, protocol, navigation, and native
+                responses.
+              </Text>
+            </View>
+            <Text style={styles.diagnosticsToggleText}>
+              {showDiagnostics ? 'Hide' : 'Show'}
+            </Text>
+          </Pressable>
+
+          {showDiagnostics ? (
+            <View style={styles.detailStack}>
+              <StatusCard
+                label="Requested source"
+                value={requestedUrl}
+              />
+              <StatusCard
+                label="Last evaluation"
+                value={formatValue(lastEvaluationResult)}
+              />
+              <StatusCard
+                label="Observation screenshot"
+                value={lastObservationResult?.screenshot.uri ?? 'None'}
+              />
+              <StatusCard
+                label="Observation warnings"
+                value={formatObservationWarnings(lastObservationResult)}
+              />
+              <StatusCard
+                label="Last observation error"
+                value={lastObservationError ?? 'None'}
+              />
+              <StatusCard
+                label="Last telemetry message"
+                value={formatValue(lastTelemetryMessage)}
+              />
+              <StatusCard
+                label="Last script error"
+                value={formatValue(lastScriptError)}
+              />
+              <StatusCard
+                label="Last telemetry protocol error"
+                value={formatValue(lastTelemetryProtocolError)}
+              />
+              <StatusCard
+                label="Last navigation error"
+                value={formatValue(lastNavigationError)}
+              />
+              <StatusCard
+                label="Last native response"
+                value={formatValue(lastNativeResponse)}
+              />
+              <StatusCard
+                label="Last agent error"
+                value={lastAgentError ?? 'None'}
+              />
+            </View>
+          ) : null}
         </ScrollView>
 
         <View style={styles.webviewFrame}>
@@ -384,19 +429,58 @@ export function BrowserScreen() {
 type DebugButtonProps = {
   label: string;
   onPress: () => void;
+  tone?: 'primary' | 'secondary' | 'quiet';
+  wide?: boolean;
 };
 
-function DebugButton({ label, onPress }: DebugButtonProps) {
+function DebugButton({
+  label,
+  onPress,
+  tone = 'secondary',
+  wide = false,
+}: DebugButtonProps) {
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
-        styles.primaryButton,
-        pressed ? styles.primaryButtonPressed : null,
+        styles.actionButton,
+        tone === 'primary' ? styles.actionButtonPrimary : null,
+        tone === 'secondary' ? styles.actionButtonSecondary : null,
+        tone === 'quiet' ? styles.actionButtonQuiet : null,
+        wide ? styles.actionButtonWide : null,
+        pressed ? styles.actionButtonPressed : null,
       ]}
     >
-      <Text style={styles.primaryButtonText}>{label}</Text>
+      <Text
+        style={[
+          styles.actionButtonText,
+          tone === 'primary' ? styles.actionButtonPrimaryText : null,
+          tone === 'quiet' ? styles.actionButtonQuietText : null,
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
+  );
+}
+
+type SummaryCardProps = {
+  label: string;
+  meta: string;
+  value: string;
+};
+
+function SummaryCard({ label, meta, value }: SummaryCardProps) {
+  return (
+    <View style={styles.summaryCard}>
+      <Text style={styles.summaryCardLabel}>{label}</Text>
+      <Text numberOfLines={2} style={styles.summaryCardValue}>
+        {value}
+      </Text>
+      <Text numberOfLines={2} style={styles.summaryCardMeta}>
+        {meta}
+      </Text>
+    </View>
   );
 }
 
@@ -447,7 +531,14 @@ function formatObservationWarnings(result: ObservationResult | null) {
   return result.warnings.join('\n');
 }
 
-function formatObservationHeadline(input: {
+function formatLoopState(loopState: string) {
+  return loopState
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+function formatObservationMetricValue(input: {
   isRunningObservation: boolean;
   lastObservationError: string | null;
   lastObservationResult: ObservationResult | null;
@@ -457,22 +548,50 @@ function formatObservationHeadline(input: {
   }
 
   if (input.lastObservationError) {
-    return `Failed: ${input.lastObservationError}`;
+    return 'Failed';
   }
 
   if (!input.lastObservationResult) {
-    return 'None';
+    return 'Idle';
   }
 
-  return `${input.lastObservationResult.axSnapshot.length} node(s) across ${input.lastObservationResult.frameSnapshots.length} frame(s)`;
+  return `${input.lastObservationResult.axSnapshot.length} nodes`;
 }
 
-function formatObservationQuiescence(result: ObservationResult | null) {
-  if (!result) {
-    return 'None';
+function formatObservationMetricMeta(input: {
+  isRunningObservation: boolean;
+  lastObservationError: string | null;
+  lastObservationResult: ObservationResult | null;
+}) {
+  if (input.isRunningObservation) {
+    return 'Collecting snapshot and frame data';
   }
 
-  return `${result.quiescence.waitTimeMs} ms wait | ${result.quiescence.observedFrameCount} frame(s)`;
+  if (input.lastObservationError) {
+    return input.lastObservationError;
+  }
+
+  if (!input.lastObservationResult) {
+    return 'No observation captured yet';
+  }
+
+  return `${input.lastObservationResult.frameSnapshots.length} frame(s) | ${input.lastObservationResult.warnings.length} warning(s)`;
+}
+
+function formatQuiescenceMetricValue(result: ObservationResult | null) {
+  if (!result) {
+    return 'Not run';
+  }
+
+  return `${result.quiescence.waitTimeMs} ms`;
+}
+
+function formatQuiescenceMetricMeta(result: ObservationResult | null) {
+  if (!result) {
+    return 'Awaiting first observation pass';
+  }
+
+  return `${result.quiescence.observedFrameCount} frame(s) idle before capture`;
 }
 
 function mapResponseToLoopState(action: string) {
@@ -497,17 +616,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b1117',
   },
   panel: {
-    maxHeight: 360,
+    maxHeight: 292,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1f2937',
+    borderBottomColor: '#17263b',
   },
   panelContent: {
-    gap: 12,
-    padding: 20,
+    gap: 10,
+    padding: 14,
   },
   panelHeader: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexDirection: 'row',
+    gap: 12,
     justifyContent: 'space-between',
   },
   eyebrow: {
@@ -523,16 +643,35 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 4,
   },
+  panelSubtitle: {
+    color: '#8ca0bd',
+    fontSize: 12.5,
+    lineHeight: 17,
+    marginTop: 4,
+    maxWidth: 260,
+  },
   panelPill: {
-    backgroundColor: '#082f49',
+    alignSelf: 'center',
+    backgroundColor: '#0d3050',
     borderRadius: 999,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 7,
   },
   panelPillText: {
     color: '#bae6fd',
     fontSize: 12,
     fontWeight: '700',
+  },
+  goalSection: {
+    backgroundColor: '#101927',
+    borderColor: '#17263b',
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 8,
+    padding: 10,
+  },
+  sectionHeader: {
+    gap: 4,
   },
   sectionLabel: {
     color: '#94a3b8',
@@ -541,13 +680,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
+  sectionCaption: {
+    color: '#64748b',
+    fontSize: 12,
+    lineHeight: 16,
+  },
   goalInput: {
-    minHeight: 84,
+    minHeight: 60,
     color: '#f8fafc',
-    backgroundColor: '#111827',
-    borderRadius: 10,
+    backgroundColor: '#0c1524',
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 8,
     textAlignVertical: 'top',
   },
   buttonRow: {
@@ -555,29 +699,89 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
-  primaryButton: {
+  actionButton: {
     alignItems: 'center',
-    backgroundColor: '#0ea5e9',
-    borderRadius: 12,
-    flex: 1,
+    borderRadius: 16,
+    flexGrow: 1,
+    minHeight: 50,
+    minWidth: 92,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
-  primaryButtonPressed: {
+  actionButtonWide: {
+    minWidth: '100%',
+  },
+  actionButtonPrimary: {
+    backgroundColor: '#38bdf8',
+  },
+  actionButtonSecondary: {
+    backgroundColor: '#142235',
+    borderColor: '#1f344d',
+    borderWidth: 1,
+  },
+  actionButtonQuiet: {
+    backgroundColor: '#101927',
+    borderColor: '#17263b',
+    borderWidth: 1,
+  },
+  actionButtonPressed: {
     opacity: 0.85,
   },
-  primaryButtonText: {
-    color: '#082f49',
+  actionButtonText: {
+    color: '#e2e8f0',
     fontSize: 14,
     fontWeight: '800',
     textAlign: 'center',
   },
+  actionButtonPrimaryText: {
+    color: '#082f49',
+  },
+  actionButtonQuietText: {
+    color: '#cbd5e1',
+  },
   statusGrid: {
     gap: 12,
   },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  summaryCard: {
+    backgroundColor: '#101927',
+    borderColor: '#17263b',
+    borderRadius: 18,
+    borderWidth: 1,
+    flexGrow: 1,
+    gap: 8,
+    minHeight: 110,
+    minWidth: 145,
+    padding: 14,
+  },
+  summaryCardLabel: {
+    color: '#7dd3fc',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  summaryCardValue: {
+    color: '#f8fafc',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+    lineHeight: 24,
+  },
+  summaryCardMeta: {
+    color: '#8ca0bd',
+    fontSize: 12,
+    lineHeight: 16,
+  },
   statusCard: {
-    backgroundColor: '#111827',
-    borderRadius: 14,
+    backgroundColor: '#101927',
+    borderColor: '#17263b',
+    borderRadius: 16,
+    borderWidth: 1,
     gap: 8,
     padding: 14,
   },
@@ -597,14 +801,46 @@ const styles = StyleSheet.create({
     }),
     fontSize: 12,
   },
+  diagnosticsToggle: {
+    alignItems: 'center',
+    backgroundColor: '#101927',
+    borderColor: '#17263b',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    padding: 14,
+  },
+  diagnosticsTogglePressed: {
+    opacity: 0.86,
+  },
+  diagnosticsToggleCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  diagnosticsToggleHint: {
+    color: '#64748b',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  diagnosticsToggleText: {
+    color: '#bae6fd',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  detailStack: {
+    gap: 10,
+  },
   webviewFrame: {
     flex: 1,
-    margin: 20,
-    marginTop: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 16,
     overflow: 'hidden',
-    borderRadius: 20,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#1f2937',
+    borderColor: '#17263b',
     backgroundColor: '#ffffff',
   },
 });
