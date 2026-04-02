@@ -1,16 +1,21 @@
 import type {
+  BrowserAxSnapshotErrorPayload,
+  BrowserAxSnapshotNodePayload,
+  BrowserAxSnapshotPayload,
   BrowserBridgeMessage,
   BrowserBridgeParseError,
   BrowserEvaluationErrorPayload,
   BrowserEvaluationErrorType,
   BrowserEvaluationResultPayload,
+  BrowserFrameLinkPayload,
   BrowserFrameMetadata,
+  BrowserObservationStatePayload,
   BrowserPageEventPayload,
   BrowserScriptErrorPayload,
 } from '../types';
 
 export const BROWSER_BRIDGE_CHANNEL = 'muninn-browser-bridge';
-export const BROWSER_BRIDGE_VERSION = '1';
+export const BROWSER_BRIDGE_VERSION = '2';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -22,6 +27,36 @@ function isString(value: unknown): value is string {
 
 function isBoolean(value: unknown): value is boolean {
   return typeof value === 'boolean';
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function parseBounds(value: unknown) {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (
+    !isNumber(value.x) ||
+    !isNumber(value.y) ||
+    !isNumber(value.width) ||
+    !isNumber(value.height)
+  ) {
+    return null;
+  }
+
+  return {
+    x: value.x,
+    y: value.y,
+    width: value.width,
+    height: value.height,
+  };
 }
 
 function parseFrame(value: unknown): BrowserFrameMetadata | null {
@@ -93,6 +128,69 @@ function isEvaluationErrorPayload(
     isString(value.message) &&
     'details' in value
   );
+}
+
+function isObservationStatePayload(
+  value: unknown
+): value is BrowserObservationStatePayload {
+  return (
+    isRecord(value) &&
+    isNumber(value.pendingRequestCount) &&
+    isString(value.lastActivityAt) &&
+    isString(value.reason)
+  );
+}
+
+function isFrameLinkPayload(value: unknown): value is BrowserFrameLinkPayload {
+  return (
+    isRecord(value) &&
+    isString(value.childFrameId) &&
+    isString(value.parentFrameId) &&
+    isBoolean(value.isVisible) &&
+    parseBounds(value.bounds) !== null
+  );
+}
+
+function isAxSnapshotNodePayload(
+  value: unknown
+): value is BrowserAxSnapshotNodePayload {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.role) &&
+    (value.label === null || value.label === undefined || isString(value.label)) &&
+    (value.value === null || value.value === undefined || isString(value.value)) &&
+    (value.text === null || value.text === undefined || isString(value.text)) &&
+    (value.placeholder === null ||
+      value.placeholder === undefined ||
+      isString(value.placeholder)) &&
+    parseBounds(value.bounds) !== null &&
+    isBoolean(value.isVisible) &&
+    isBoolean(value.isHidden) &&
+    isBoolean(value.isEnabled) &&
+    (value.frameId === null || value.frameId === undefined || isString(value.frameId)) &&
+    (value.frameUrl === null || value.frameUrl === undefined || isString(value.frameUrl)) &&
+    isBoolean(value.valueRedacted) &&
+    (value.redactionReason === null ||
+      value.redactionReason === undefined ||
+      isString(value.redactionReason))
+  );
+}
+
+function isAxSnapshotPayload(value: unknown): value is BrowserAxSnapshotPayload {
+  return (
+    isRecord(value) &&
+    isString(value.requestId) &&
+    isString(value.observedAt) &&
+    isArray(value.nodes) &&
+    value.nodes.every((node) => isAxSnapshotNodePayload(node))
+  );
+}
+
+function isAxSnapshotErrorPayload(
+  value: unknown
+): value is BrowserAxSnapshotErrorPayload {
+  return isRecord(value) && isString(value.requestId) && isString(value.message);
 }
 
 function createParseError(
@@ -189,6 +287,105 @@ export function parseBrowserBridgeMessage(
         name: parsed.payload.name,
         message: parsed.payload.message,
         stack: isString(parsed.payload.stack) ? parsed.payload.stack : null,
+      },
+    };
+  }
+
+  if (parsed.kind === 'observation_state') {
+    if (!isObservationStatePayload(parsed.payload)) {
+      return createParseError('Observation state payload is malformed.', raw);
+    }
+
+    return {
+      channel: BROWSER_BRIDGE_CHANNEL,
+      kind: 'observation_state',
+      timestamp: parsed.timestamp,
+      frame,
+      payload: {
+        lastActivityAt: parsed.payload.lastActivityAt,
+        pendingRequestCount: parsed.payload.pendingRequestCount,
+        reason: parsed.payload.reason,
+      },
+    };
+  }
+
+  if (parsed.kind === 'frame_link') {
+    if (!isFrameLinkPayload(parsed.payload)) {
+      return createParseError('Frame link payload is malformed.', raw);
+    }
+
+    return {
+      channel: BROWSER_BRIDGE_CHANNEL,
+      kind: 'frame_link',
+      timestamp: parsed.timestamp,
+      frame,
+      payload: {
+        childFrameId: parsed.payload.childFrameId,
+        parentFrameId: parsed.payload.parentFrameId,
+        bounds: parseBounds(parsed.payload.bounds) ?? {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+        },
+        isVisible: parsed.payload.isVisible,
+      },
+    };
+  }
+
+  if (parsed.kind === 'ax_snapshot') {
+    if (!isAxSnapshotPayload(parsed.payload)) {
+      return createParseError('AX snapshot payload is malformed.', raw);
+    }
+
+    return {
+      channel: BROWSER_BRIDGE_CHANNEL,
+      kind: 'ax_snapshot',
+      timestamp: parsed.timestamp,
+      frame,
+      payload: {
+        requestId: parsed.payload.requestId,
+        observedAt: parsed.payload.observedAt,
+        nodes: parsed.payload.nodes.map((node) => ({
+          id: node.id,
+          role: node.role,
+          label: isString(node.label) ? node.label : null,
+          value: isString(node.value) ? node.value : null,
+          text: isString(node.text) ? node.text : null,
+          placeholder: isString(node.placeholder) ? node.placeholder : null,
+          bounds: parseBounds(node.bounds) ?? {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+          },
+          isVisible: node.isVisible,
+          isHidden: node.isHidden,
+          isEnabled: node.isEnabled,
+          frameId: isString(node.frameId) ? node.frameId : null,
+          frameUrl: isString(node.frameUrl) ? node.frameUrl : null,
+          valueRedacted: node.valueRedacted,
+          redactionReason: isString(node.redactionReason)
+            ? node.redactionReason
+            : null,
+        })),
+      },
+    };
+  }
+
+  if (parsed.kind === 'ax_snapshot_error') {
+    if (!isAxSnapshotErrorPayload(parsed.payload)) {
+      return createParseError('AX snapshot error payload is malformed.', raw);
+    }
+
+    return {
+      channel: BROWSER_BRIDGE_CHANNEL,
+      kind: 'ax_snapshot_error',
+      timestamp: parsed.timestamp,
+      frame,
+      payload: {
+        requestId: parsed.payload.requestId,
+        message: parsed.payload.message,
       },
     };
   }

@@ -42,6 +42,10 @@ public class BrowserHostModule: Module {
         view.evaluateJavaScript(source, promise: promise)
       }
 
+      AsyncFunction("captureViewport") { (view: BrowserHostView, promise: Promise) in
+        view.captureViewport(promise: promise)
+      }
+
       AsyncFunction("goBack") { (view: BrowserHostView) -> NSNull in
         view.goBack()
         return NSNull()

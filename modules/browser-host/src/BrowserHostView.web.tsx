@@ -6,6 +6,11 @@ import type { BrowserHostViewHandle, BrowserHostViewProps } from './BrowserHost.
 const BrowserHostView = React.forwardRef<BrowserHostViewHandle, BrowserHostViewProps>(
   function BrowserHostView(props, ref) {
     React.useImperativeHandle(ref, () => ({
+      captureViewport: async () => ({
+        ok: false,
+        code: 'capture_unavailable',
+        message: 'Viewport capture is only implemented natively on iOS.',
+      }),
       evaluateJavaScript: async () => ({
         ok: false,
         code: 'execution_error',
