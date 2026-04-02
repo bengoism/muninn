@@ -289,6 +289,16 @@ export function buildBridgeBootstrapScript() {
     );
   }
 
+  function isEditableElement(element) {
+    return (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement ||
+      element.getAttribute('contenteditable') === 'true' ||
+      element.getAttribute('contenteditable') === ''
+    );
+  }
+
   function getElementRole(element) {
     const explicitRole = normalizeString(element.getAttribute('role'));
 
@@ -339,16 +349,25 @@ export function buildBridgeBootstrapScript() {
     return 'generic';
   }
 
+  function getElementLabelCandidates(element) {
+    return [
+      normalizeString(element.getAttribute('aria-label')),
+      getAriaLabelledByText(element),
+      getAssociatedLabelText(element),
+      normalizeString(element.getAttribute('alt')),
+      normalizeString(element.getAttribute('title')),
+      normalizeString(element.getAttribute('placeholder')),
+    ].filter(Boolean);
+  }
+
   function getElementLabel(element) {
-    return (
-      normalizeString(element.getAttribute('aria-label')) ||
-      getAriaLabelledByText(element) ||
-      getAssociatedLabelText(element) ||
-      normalizeString(element.getAttribute('alt')) ||
-      normalizeString(element.getAttribute('title')) ||
-      normalizeString(element.getAttribute('placeholder')) ||
-      getElementText(element)
-    );
+    const labelCandidates = getElementLabelCandidates(element);
+
+    if (labelCandidates.length > 0) {
+      return labelCandidates.join(' ');
+    }
+
+    return isEditableElement(element) ? null : getElementText(element);
   }
 
   function getElementPlaceholder(element) {
@@ -387,9 +406,8 @@ export function buildBridgeBootstrapScript() {
       normalizeString(element.getAttribute('id')),
       normalizeString(element.getAttribute('autocomplete')),
       normalizeString(element.getAttribute('inputmode')),
-      normalizeString(element.getAttribute('placeholder')),
-      normalizeString(element.getAttribute('aria-label')),
       type,
+      ...getElementLabelCandidates(element),
     ]
       .filter(Boolean)
       .join(' ');
@@ -458,13 +476,15 @@ export function buildBridgeBootstrapScript() {
     const style = getComputedStyleSafe(element);
     const rawValue = getElementValue(element);
     const redactionReason = getRedactionReason(element, rawValue);
+    const label = getElementLabel(element);
+    const text = getElementText(element);
 
     return {
       id: ensureNodeId(element),
       role: getElementRole(element),
-      label: getElementLabel(element),
+      label: label,
       value: redactionReason ? null : rawValue,
-      text: getElementText(element),
+      text: redactionReason ? null : text,
       placeholder: getElementPlaceholder(element),
       bounds: toBounds(rect),
       isVisible: isElementVisible(element, rect, style),
@@ -629,22 +649,34 @@ export function buildBridgeBootstrapScript() {
 
     const originalSend = window.XMLHttpRequest.prototype.send;
     window.XMLHttpRequest.prototype.send = function () {
+      const request = this;
+      let completed = false;
       incrementPending('xhr-start');
 
       const complete = function () {
-        this.removeEventListener('loadend', complete);
-        this.removeEventListener('error', complete);
-        this.removeEventListener('abort', complete);
-        this.removeEventListener('timeout', complete);
+        if (completed) {
+          return;
+        }
+
+        completed = true;
+        request.removeEventListener('loadend', complete);
+        request.removeEventListener('error', complete);
+        request.removeEventListener('abort', complete);
+        request.removeEventListener('timeout', complete);
         decrementPending('xhr-end');
       };
 
-      this.addEventListener('loadend', complete);
-      this.addEventListener('error', complete);
-      this.addEventListener('abort', complete);
-      this.addEventListener('timeout', complete);
+      request.addEventListener('loadend', complete);
+      request.addEventListener('error', complete);
+      request.addEventListener('abort', complete);
+      request.addEventListener('timeout', complete);
 
-      return originalSend.apply(this, arguments);
+      try {
+        return originalSend.apply(request, arguments);
+      } catch (error) {
+        complete();
+        throw error;
+      }
     };
 
     window.XMLHttpRequest.prototype.__muninnWrapped = true;

@@ -27,18 +27,45 @@ export function stitchObservationArtifacts(
   input: StitchObservationInput
 ): StitchObservationOutput {
   const warnings: string[] = [];
+  const topFrameIds = new Set(
+    input.responses
+      .filter((response) => response.frame.isTopFrame)
+      .map((response) => response.frame.frameId)
+  );
   const responsesByFrameId = new Map(
     input.responses.map((response) => [response.frame.frameId, response] as const)
   );
   const errorsByFrameId = new Map(
     input.errors.map((error) => [error.frame.frameId, error] as const)
   );
+  input.errors.forEach((error) => {
+    if (error.frame.isTopFrame) {
+      topFrameIds.add(error.frame.frameId);
+    }
+  });
   const frameIds = new Set<string>([
     ...input.expectedFrameIds,
     ...responsesByFrameId.keys(),
     ...errorsByFrameId.keys(),
     ...input.frameLinks.keys(),
   ]);
+  const rootFrameIds = new Set(topFrameIds);
+  const linkedChildFrameIds = new Set(input.frameLinks.keys());
+
+  input.frameLinks.forEach((link) => {
+    if (!linkedChildFrameIds.has(link.parentFrameId)) {
+      rootFrameIds.add(link.parentFrameId);
+    }
+  });
+
+  if (rootFrameIds.size === 0 && frameIds.size === 1) {
+    const [onlyFrameId] = Array.from(frameIds);
+
+    if (onlyFrameId) {
+      rootFrameIds.add(onlyFrameId);
+    }
+  }
+
   const originCache = new Map<string, Point | null>();
 
   const frameSnapshots = Array.from(frameIds)
@@ -50,6 +77,7 @@ export function stitchObservationArtifacts(
       const frameOrigin = resolveFrameOrigin(
         frameId,
         input.frameLinks,
+        rootFrameIds,
         originCache,
         warnings
       );
@@ -77,9 +105,17 @@ export function stitchObservationArtifacts(
       resolveFrameOrigin(
         response.frame.frameId,
         input.frameLinks,
+        rootFrameIds,
         originCache,
         warnings
-      ) ?? { x: 0, y: 0 };
+      );
+
+    if (!frameOrigin) {
+      warnings.push(
+        `Skipped AX snapshot nodes for frame "${response.frame.frameId}" because its viewport origin could not be resolved.`
+      );
+      return [];
+    }
 
     return response.payload.nodes.map((node) => ({
       bounds: {
@@ -115,6 +151,7 @@ export function stitchObservationArtifacts(
 function resolveFrameOrigin(
   frameId: string,
   frameLinks: Map<string, BrowserFrameLinkPayload>,
+  rootFrameIds: Set<string>,
   cache: Map<string, Point | null>,
   warnings: string[],
   trail: Set<string> = new Set()
@@ -132,6 +169,12 @@ function resolveFrameOrigin(
   const link = frameLinks.get(frameId);
 
   if (!link) {
+    if (!rootFrameIds.has(frameId)) {
+      warnings.push(`Missing frame link metadata for "${frameId}".`);
+      cache.set(frameId, null);
+      return null;
+    }
+
     const rootOrigin = { x: 0, y: 0 };
     cache.set(frameId, rootOrigin);
     return rootOrigin;
@@ -141,6 +184,7 @@ function resolveFrameOrigin(
   const parentOrigin = resolveFrameOrigin(
     link.parentFrameId,
     frameLinks,
+    rootFrameIds,
     cache,
     warnings,
     trail
