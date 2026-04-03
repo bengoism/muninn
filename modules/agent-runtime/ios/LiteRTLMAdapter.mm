@@ -553,6 +553,67 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
       (int)LiteRTLMMaxOutputTokensFromRuntimeConfig(runtimeConfig));
   litert_lm_session_config_set_sampler_params(sessionConfig, &samplerParams);
 
+  // Build the tools JSON schema for the action contract. Even without
+  // constrained decoding this helps the model understand the expected format.
+  static NSString *toolsJSON = nil;
+  static dispatch_once_t toolsOnce;
+  dispatch_once(&toolsOnce, ^{
+    // Gemma 4 Jinja template expects each tool wrapped in {"function": {...}}.
+    NSArray<NSDictionary<NSString *, id> *> *tools = @[
+      @{ @"function": @{ @"name": @"click", @"description": @"Click an element by accessibility ID",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element accessibility ID" } },
+          @"required": @[ @"id" ] } } },
+      @{ @"function": @{ @"name": @"tap_coordinates", @"description": @"Tap at screen coordinates",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"x": @{ @"type": @"number", @"description": @"X coordinate" },
+          @"y": @{ @"type": @"number", @"description": @"Y coordinate" } },
+          @"required": @[ @"x", @"y" ] } } },
+      @{ @"function": @{ @"name": @"type", @"description": @"Type text into an input element",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element accessibility ID" },
+          @"text": @{ @"type": @"string", @"description": @"Text to type" } },
+          @"required": @[ @"id", @"text" ] } } },
+      @{ @"function": @{ @"name": @"scroll", @"description": @"Scroll the page",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"direction": @{ @"type": @"string", @"description": @"up, down, left, or right" },
+          @"amount": @{ @"type": @"string", @"description": @"page, half, or small" } },
+          @"required": @[ @"direction", @"amount" ] } } },
+      @{ @"function": @{ @"name": @"go_back", @"description": @"Navigate back",
+        @"parameters": @{ @"type": @"object", @"properties": @{} } } },
+      @{ @"function": @{ @"name": @"wait", @"description": @"Wait for a condition",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"condition": @{ @"type": @"string", @"description": @"Condition to wait for" } },
+          @"required": @[ @"condition" ] } } },
+      @{ @"function": @{ @"name": @"yield_to_user", @"description": @"Ask the user for help",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"reason": @{ @"type": @"string", @"description": @"Why user input is needed" } },
+          @"required": @[ @"reason" ] } } },
+      @{ @"function": @{ @"name": @"finish", @"description": @"Task is complete",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"status": @{ @"type": @"string", @"description": @"success or failure" },
+          @"message": @{ @"type": @"string", @"description": @"Summary of outcome" } },
+          @"required": @[ @"status", @"message" ] } } },
+    ];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:tools options:0 error:nil];
+    toolsJSON = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+  });
+
+  // Build system message for structured output.
+  static NSString *systemMessageJSON = nil;
+  static dispatch_once_t systemOnce;
+  dispatch_once(&systemOnce, ^{
+    NSDictionary<NSString *, id> *systemMessage = @{
+      @"role": @"system",
+      @"content": @"You are a browser automation agent. You see a screenshot of a webpage and an accessibility tree. "
+                   "Decide the single best next action to achieve the user's goal. "
+                   "Respond with exactly one JSON object: {\"action\": \"<name>\", \"parameters\": {<params>}}. "
+                   "Do not include any text outside the JSON."
+    };
+    NSData *data = [NSJSONSerialization dataWithJSONObject:systemMessage options:0 error:nil];
+    systemMessageJSON = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+  });
+
   // Build multimodal conversation message with screenshot file path + prompt.
   // LiteRT-LM's LoadItemData accepts {"type":"image","path":"..."} and
   // memory-maps the file directly — no base64 encoding needed.
@@ -577,12 +638,21 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   NSString *messageJSON = [[NSString alloc] initWithData:messageData encoding:NSUTF8StringEncoding];
 
   if (verboseNativeLogging) {
-    NSLog(@"[LiteRTLMAdapter] runInference: creating conversation (screenshot=%@, prompt=%luC)",
-          runtimeDiagnostics[@"screenshotBytes"], (unsigned long)prompt.length);
+    NSLog(@"[LiteRTLMAdapter] runInference: creating conversation (screenshot=%@, prompt=%luC, tools=%@)",
+          runtimeDiagnostics[@"screenshotBytes"], (unsigned long)prompt.length,
+          toolsJSON != nil ? @"yes" : @"no");
   }
 
+  // Pass system message and tools schema to the conversation config.
+  // Constrained decoding is disabled because our xcframework has stub
+  // constraint provider symbols. The tools schema still helps the model
+  // understand the expected output format via the prompt context.
   LiteRtLmConversationConfig *conversationConfig =
-      litert_lm_conversation_config_create(engine, sessionConfig, nullptr, nullptr, nullptr, false);
+      litert_lm_conversation_config_create(
+          engine, sessionConfig,
+          systemMessageJSON ? systemMessageJSON.UTF8String : nullptr,
+          toolsJSON ? toolsJSON.UTF8String : nullptr,
+          nullptr, false);
   litert_lm_session_config_delete(sessionConfig);
 
   if (conversationConfig == nullptr) {
@@ -628,71 +698,102 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   NSString *responseJSONString = responseCString != nullptr
       ? [NSString stringWithUTF8String:responseCString] : nil;
   id responseObject = LiteRTLMParseJSONObjectFromUTF8(responseCString);
-  NSString *extractedText = LiteRTLMExtractTextFromResponseObject(responseObject);
 
   litert_lm_json_response_delete(jsonResponse);
   litert_lm_conversation_delete(conversation);
 
-  NSString *rawModelText = [extractedText stringByTrimmingCharactersInSet:
-      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if (rawModelText.length == 0 && responseJSONString != nil) {
-    rawModelText = [responseJSONString stringByTrimmingCharactersInSet:
-        [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  }
-
-  if (rawModelText.length == 0) {
-    if (error != nil) {
-      *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
-                             @"Model returned empty response for inference.",
-                             runtimeDiagnostics);
-    }
-    return nil;
-  }
-
   if (verboseNativeLogging) {
-    NSLog(@"[LiteRTLMAdapter] runInference: raw model output=%@", rawModelText);
+    NSLog(@"[LiteRTLMAdapter] runInference: raw model output=%@", responseJSONString ?: @"null");
   }
 
-  // Try to parse the model text as a JSON action object.
-  // Strip markdown code fences if the model wraps its output.
-  NSString *jsonCandidate = rawModelText;
-  if ([jsonCandidate hasPrefix:@"```"]) {
-    NSRange firstNewline = [jsonCandidate rangeOfString:@"\n"];
-    NSRange lastFence = [jsonCandidate rangeOfString:@"```" options:NSBackwardsSearch];
-    if (firstNewline.location != NSNotFound && lastFence.location > firstNewline.location) {
-      jsonCandidate = [jsonCandidate substringWithRange:
-          NSMakeRange(firstNewline.location + 1,
-                      lastFence.location - firstNewline.location - 1)];
-      jsonCandidate = [jsonCandidate stringByTrimmingCharactersInSet:
-          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    }
-  }
-
-  NSData *actionData = [jsonCandidate dataUsingEncoding:NSUTF8StringEncoding];
-  id actionObject = actionData != nil
-      ? [NSJSONSerialization JSONObjectWithData:actionData options:0 error:nil]
-      : nil;
-
-  if (![actionObject isKindOfClass:[NSDictionary class]]) {
+  if (![responseObject isKindOfClass:[NSDictionary class]]) {
     if (error != nil) {
-      runtimeDiagnostics[@"rawModelOutput"] = rawModelText;
+      NSMutableDictionary<NSString *, id> *details = [runtimeDiagnostics mutableCopy];
+      details[@"rawModelOutput"] = responseJSONString ?: @"";
+      details[@"failureClass"] = @"invalid_json";
       *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
-                             @"Model output is not a valid JSON action object.",
-                             runtimeDiagnostics);
+                             @"Model returned unparseable response.",
+                             details);
     }
     return nil;
   }
 
-  NSDictionary<NSString *, id> *actionDict = (NSDictionary<NSString *, id> *)actionObject;
-  NSString *action = actionDict[@"action"];
-  NSDictionary<NSString *, id> *parameters = actionDict[@"parameters"];
+  NSDictionary<NSString *, id> *responseDictionary = (NSDictionary<NSString *, id> *)responseObject;
+  NSString *action = nil;
+  NSDictionary<NSString *, id> *parameters = nil;
 
-  if (![action isKindOfClass:[NSString class]] || action.length == 0) {
+  // Parse Gemma 4 native tool_calls format:
+  // {"role":"assistant","tool_calls":[{"type":"function","function":{"name":"...","arguments":{...}}}]}
+  NSArray<NSDictionary<NSString *, id> *> *toolCalls = responseDictionary[@"tool_calls"];
+  if ([toolCalls isKindOfClass:[NSArray class]] && toolCalls.count > 0) {
+    NSDictionary<NSString *, id> *firstCall = toolCalls.firstObject;
+    if ([firstCall isKindOfClass:[NSDictionary class]]) {
+      NSDictionary<NSString *, id> *function = firstCall[@"function"];
+      if ([function isKindOfClass:[NSDictionary class]]) {
+        action = function[@"name"];
+        NSDictionary<NSString *, id> *rawArguments = function[@"arguments"];
+        if ([rawArguments isKindOfClass:[NSDictionary class]]) {
+          // Strip Gemma's <|"|> quote markers from string values.
+          NSMutableDictionary<NSString *, id> *cleaned = [NSMutableDictionary dictionary];
+          for (NSString *key in rawArguments) {
+            id value = rawArguments[key];
+            if ([value isKindOfClass:[NSString class]]) {
+              NSString *str = (NSString *)value;
+              str = [str stringByReplacingOccurrencesOfString:@"<|\"|>" withString:@""];
+              cleaned[key] = str;
+            } else {
+              cleaned[key] = value;
+            }
+          }
+          parameters = cleaned;
+        }
+      }
+    }
+  }
+
+  // Fallback: try {"action":"...", "parameters":{...}} format.
+  if (action == nil) {
+    action = responseDictionary[@"action"];
+    parameters = responseDictionary[@"parameters"];
+
+    // Also try extracting text content and parsing as JSON.
+    if (action == nil) {
+      NSString *extractedText = LiteRTLMExtractTextFromResponseObject(responseObject);
+      NSString *textCandidate = [extractedText stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+      if (textCandidate.length > 0) {
+        // Strip code fences.
+        if ([textCandidate hasPrefix:@"```"]) {
+          NSRange firstNewline = [textCandidate rangeOfString:@"\n"];
+          NSRange lastFence = [textCandidate rangeOfString:@"```" options:NSBackwardsSearch];
+          if (firstNewline.location != NSNotFound && lastFence.location > firstNewline.location) {
+            textCandidate = [textCandidate substringWithRange:
+                NSMakeRange(firstNewline.location + 1,
+                            lastFence.location - firstNewline.location - 1)];
+            textCandidate = [textCandidate stringByTrimmingCharactersInSet:
+                [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+          }
+        }
+        NSData *textData = [textCandidate dataUsingEncoding:NSUTF8StringEncoding];
+        id textObject = textData != nil
+            ? [NSJSONSerialization JSONObjectWithData:textData options:0 error:nil] : nil;
+        if ([textObject isKindOfClass:[NSDictionary class]]) {
+          action = ((NSDictionary *)textObject)[@"action"];
+          parameters = ((NSDictionary *)textObject)[@"parameters"];
+        }
+      }
+    }
+  }
+
+  if (![action isKindOfClass:[NSString class]] || ((NSString *)action).length == 0) {
     if (error != nil) {
-      runtimeDiagnostics[@"rawModelOutput"] = rawModelText;
+      NSMutableDictionary<NSString *, id> *details = [runtimeDiagnostics mutableCopy];
+      details[@"rawModelOutput"] = responseJSONString ?: @"";
+      details[@"parsedKeys"] = [responseDictionary allKeys] ?: @[];
+      details[@"failureClass"] = @"missing_action";
       *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
-                             @"Model output JSON is missing an 'action' field.",
-                             runtimeDiagnostics);
+                             @"Could not extract action from model response.",
+                             details);
     }
     return nil;
   }
