@@ -14,11 +14,54 @@ class AgentRuntimeModule : Module() {
       val actionHistory = request["actionHistory"] as? List<*> ?: emptyList<Any>()
 
       mapOf(
+        "ok" to true,
         "action" to "finish",
         "parameters" to mapOf(
-          "status" to "stubbed",
+          "status" to "replay",
           "message" to "Native bridge ready for goal '$goal'. Screenshot: $screenshotUri. AX nodes: ${axSnapshot.size}. Prior actions: ${actionHistory.size}."
+        ),
+        "backend" to "android-stub",
+        "diagnostics" to mapOf(
+          "actionHistoryCount" to actionHistory.size,
+          "screenshotUri" to screenshotUri
         )
+      )
+    }
+
+    AsyncFunction("runLiteRTLMSmokeTest") { _: String ->
+      mapOf(
+        "ok" to false,
+        "code" to "model_load_failed",
+        "message" to "LiteRT-LM text smoke tests are unavailable on the Android stub.",
+        "details" to null,
+        "retryable" to false,
+        "backend" to "android-stub"
+      )
+    }
+
+    AsyncFunction("listAvailableModels") {
+      emptyList<Map<String, Any?>>()
+    }
+
+    AsyncFunction("getModelStatus") {
+      mapOf(
+        "activeModelId" to null,
+        "activeCommitHash" to null,
+        "isDownloading" to false,
+        "downloadedBytes" to 0,
+        "totalBytes" to 0,
+        "lastError" to "Model downloads are unavailable on the Android stub."
+      )
+    }
+
+    AsyncFunction("downloadModel") { _: String ->
+      mapOf(
+        "activeModelId" to null,
+        "activeCommitHash" to null,
+        "isDownloading" to false,
+        "downloadedBytes" to 0,
+        "totalBytes" to 0,
+        "lastError" to "Model downloads are unavailable on the Android stub."
       )
     }
   }

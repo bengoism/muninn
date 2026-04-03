@@ -1,9 +1,17 @@
 export type {
   AgentActionRecord,
   AxNode,
+  InferenceFailure,
+  InferenceFailureCode,
+  ModelCatalogEntry,
+  ModelStatus,
   InferenceRequest,
   InferenceResponse,
+  InferenceSuccess,
+  LiteRTLMSmokeTestResponse,
+  LiteRTLMSmokeTestSuccess,
   LoopState,
+  RuntimeMode,
   ToolName,
 } from '../../../src/types/agent';
 

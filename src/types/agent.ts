@@ -8,6 +8,8 @@ export type ToolName =
   | 'yield_to_user'
   | 'finish';
 
+export type RuntimeMode = 'replay' | 'litertlm';
+
 export type Bounds = {
   x: number;
   y: number;
@@ -51,11 +53,70 @@ export type InferenceRequest = {
   screenshotUri: string;
   axSnapshot: AxNode[];
   actionHistory: AgentActionRecord[];
+  runtimeMode: RuntimeMode;
 };
 
-export type InferenceResponse = {
+export type InferenceSuccess = {
+  ok: true;
   action: ToolName;
   parameters: Record<string, unknown>;
+  backend: string;
+  diagnostics: Record<string, unknown> | null;
+};
+
+export type InferenceFailureCode =
+  | 'invalid_request'
+  | 'screenshot_not_found'
+  | 'screenshot_load_failed'
+  | 'model_not_configured'
+  | 'model_load_failed'
+  | 'invalid_model_output'
+  | 'unsupported_action'
+  | 'missing_parameter'
+  | 'memory_pressure'
+  | 'timeout'
+  | 'internal_error';
+
+export type InferenceFailure = {
+  ok: false;
+  code: InferenceFailureCode;
+  message: string;
+  details: Record<string, unknown> | null;
+  retryable: boolean;
+  backend: string;
+};
+
+export type InferenceResponse = InferenceSuccess | InferenceFailure;
+
+export type LiteRTLMSmokeTestSuccess = {
+  ok: true;
+  text: string;
+  backend: string;
+  diagnostics: Record<string, unknown> | null;
+};
+
+export type LiteRTLMSmokeTestResponse =
+  | LiteRTLMSmokeTestSuccess
+  | InferenceFailure;
+
+export type ModelCatalogEntry = {
+  id: string;
+  displayName: string;
+  modelId: string;
+  commitHash: string;
+  filename: string;
+  approximateSizeBytes: number;
+  downloaded: boolean;
+  active: boolean;
+};
+
+export type ModelStatus = {
+  activeModelId: string | null;
+  activeCommitHash: string | null;
+  isDownloading: boolean;
+  downloadedBytes: number;
+  totalBytes: number;
+  lastError: string | null;
 };
 
 export type ViewportCapture = {
