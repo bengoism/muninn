@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 
 import { runInference } from '../../../native/agent-runtime';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
+import { useBrowserStore } from '../../../state/browser-store';
 import type {
   AgentActionRecord,
   InferenceSuccess,
@@ -116,9 +117,10 @@ export function useAgentLoop(
 
           // 3. TERMINAL ACTION
           if (definition?.terminal) {
+            const urlNow = useBrowserStore.getState().currentUrl;
             const result = await executeTool(action, parameters, browser);
             addActionRecord(
-              toActionRecord(action, parameters, result.ok, result.reason)
+              toActionRecord(action, parameters, result.ok, result.reason, urlNow, urlNow)
             );
             setLoopState(action === 'finish' ? 'finished' : 'yielded');
             break;
@@ -126,20 +128,25 @@ export function useAgentLoop(
 
           // 4. ACT
           setLoopState('acting');
+          const urlBefore = useBrowserStore.getState().currentUrl;
           const toolResult = await executeTool(action, parameters, browser);
-          addActionRecord(
-            toActionRecord(
-              action,
-              parameters,
-              toolResult.ok,
-              toolResult.reason
-            )
-          );
           if (cancelledRef.current) break;
 
           // 5. VALIDATE
           setLoopState('validating');
           await delay(mergedConfigRef.current.postActionSettleMs);
+          const urlAfter = useBrowserStore.getState().currentUrl;
+
+          addActionRecord(
+            toActionRecord(
+              action,
+              parameters,
+              toolResult.ok,
+              toolResult.reason,
+              urlBefore,
+              urlAfter
+            )
+          );
 
           if (!toolResult.ok) {
             consecutiveNoOps++;
@@ -204,13 +211,17 @@ function toActionRecord(
   action: ToolName,
   parameters: Record<string, unknown>,
   ok: boolean,
-  reason: string | null
+  reason: string | null,
+  urlBefore: string | null,
+  urlAfter: string | null
 ): AgentActionRecord {
   return {
     action,
     parameters,
     status: ok ? 'succeeded' : 'failed',
     reason,
+    urlBefore: urlBefore ?? null,
+    urlAfter: urlAfter ?? null,
     timestamp: new Date().toISOString(),
   };
 }
