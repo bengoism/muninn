@@ -153,8 +153,10 @@ bazelisk build \
   --symlink_prefix="$SOURCE_DIR/bazel-ios-sim-"
 
 EXECUTION_ROOT="$(bazelisk info execution_root)"
-IOS_ARM64_LIB="/tmp/libengine_cpu.a"
-IOS_SIM_ARM64_LIB="/tmp/libengine_cpu_sim.a"
+IOS_ARM64_DIR="$(mktemp -d /tmp/litert-lm-device-XXXXXX)"
+IOS_SIM_ARM64_DIR="$(mktemp -d /tmp/litert-lm-sim-XXXXXX)"
+IOS_ARM64_LIB="$IOS_ARM64_DIR/libengine_cpu.a"
+IOS_SIM_ARM64_LIB="$IOS_SIM_ARM64_DIR/libengine_cpu.a"
 
 build_monolith "$EXECUTION_ROOT" "$IOS_ARM64_LIB" "ios_arm64-opt" "arm64-apple-ios15.1" "iphoneos"
 build_monolith "$EXECUTION_ROOT" "$IOS_SIM_ARM64_LIB" "ios_sim_arm64-opt" "arm64-apple-ios15.1-simulator" "iphonesimulator"
@@ -169,7 +171,7 @@ if [[ ! -f "$IOS_ARM64_LIB" || ! -f "$IOS_SIM_ARM64_LIB" ]]; then
 fi
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"; rm -f "$IOS_ARM64_LIB" "$IOS_SIM_ARM64_LIB"' EXIT
+trap 'rm -rf "$TMP_DIR" "$IOS_ARM64_DIR" "$IOS_SIM_ARM64_DIR"' EXIT
 
 mkdir -p "$TMP_DIR/include"
 cp "$SOURCE_DIR/c/engine.h" "$TMP_DIR/include/engine.h"
