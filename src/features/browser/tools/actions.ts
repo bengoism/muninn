@@ -45,19 +45,31 @@ export const ACTIONS_INJECTION_SCRIPT = `
       if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       el.focus();
-      if ('value' in el) {
-        var nativeSetter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype, 'value'
-        ) || Object.getOwnPropertyDescriptor(
-          HTMLTextAreaElement.prototype, 'value'
-        );
-        if (nativeSetter && nativeSetter.set) {
-          nativeSetter.set.call(el, text);
-        } else {
+      try {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          var nativeSetter = Object.getOwnPropertyDescriptor(
+            Object.getPrototypeOf(el).constructor.prototype, 'value'
+          );
+          if (nativeSetter && nativeSetter.set) {
+            nativeSetter.set.call(el, text);
+          } else {
+            el.value = text;
+          }
+        } else if ('value' in el) {
           el.value = text;
+        } else {
+          el.textContent = text;
         }
-      } else {
-        el.textContent = text;
+      } catch (e) {
+        // Fallback: simulate typing character by character via keyboard events.
+        for (var i = 0; i < text.length; i++) {
+          var ch = text[i];
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
+        }
+        // Also try direct assignment as last resort.
+        try { el.value = text; } catch (_) {}
       }
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
