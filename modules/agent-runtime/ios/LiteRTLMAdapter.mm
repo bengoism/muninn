@@ -3,9 +3,6 @@
 #include <string.h>
 
 static NSString *const LiteRTLMAdapterErrorDomain = @"AgentRuntimeLiteRTLMAdapter";
-static NSString *const LiteRTLMStructuredInferenceHint =
-    @"Text smoke tests are now wired through the LiteRT-LM C API. "
-     "Structured browser-action inference is intentionally still disabled in this slice.";
 
 typedef NS_ENUM(NSInteger, LiteRTLMAdapterErrorCode) {
   LiteRTLMAdapterErrorRuntimeUnavailable = 501,
@@ -414,7 +411,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
       LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
           modelPath.fileSystemRepresentation,
           backend.UTF8String,
-          nullptr,
+          backend.UTF8String,
           nullptr);
       if (settings == nullptr) {
         if (error != nil) {
@@ -503,21 +500,322 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
                                              screenshotPath:(NSString *)screenshotPath
                                                 axNodeCount:(NSNumber *)axNodeCount
                                                       error:(NSError * _Nullable __autoreleasing *)error {
-  if (error != nil) {
-    NSMutableDictionary<NSString *, id> *details =
-        [LiteRTLMRuntimeConfigDiagnostics(runtimeConfig) mutableCopy];
-    details[@"hint"] = LiteRTLMStructuredInferenceHint;
-    details[@"modelPath"] = modelPath ?: @"";
-    details[@"promptLength"] = @(prompt.length);
-    details[@"goalLength"] = @(goal.length);
-    details[@"screenshotPath"] = screenshotPath ?: @"";
-    details[@"axNodeCount"] = axNodeCount ?: @0;
-    *error = LiteRTLMError(LiteRTLMAdapterErrorRuntimeUnavailable,
-                           @"Structured browser-action inference is not wired yet.",
-                           details);
+  const CFAbsoluteTime startedAt = CFAbsoluteTimeGetCurrent();
+  BOOL verboseNativeLogging =
+      LiteRTLMVerboseNativeLoggingFromRuntimeConfig(runtimeConfig);
+  BOOL coldStart = NO;
+
+  LiteRtLmEngine *engine = [self ensureEngineWithModelPath:modelPath
+                                             runtimeConfig:runtimeConfig
+                                              wasColdStart:&coldStart
+                                                     error:error];
+  if (engine == nullptr) {
+    return nil;
   }
 
-  return nil;
+  NSMutableDictionary<NSString *, id> *runtimeDiagnostics =
+      [LiteRTLMRuntimeConfigDiagnostics(runtimeConfig) mutableCopy];
+  runtimeDiagnostics[@"modelPath"] = modelPath ?: @"";
+  runtimeDiagnostics[@"backend"] = _loadedBackend ?: @"unknown";
+  runtimeDiagnostics[@"maxNumTokens"] = _loadedMaxNumTokens ?: @(0);
+
+  // Validate screenshot file exists.
+  if (screenshotPath.length == 0 ||
+      ![[NSFileManager defaultManager] isReadableFileAtPath:screenshotPath]) {
+    if (error != nil) {
+      runtimeDiagnostics[@"screenshotPath"] = screenshotPath ?: @"";
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"Screenshot file is not readable.",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  NSDictionary<NSFileAttributeKey, id> *screenshotAttributes =
+      [[NSFileManager defaultManager] attributesOfItemAtPath:screenshotPath error:nil];
+  runtimeDiagnostics[@"screenshotBytes"] = screenshotAttributes[NSFileSize] ?: @(0);
+
+  // Build session and conversation config.
+  LiteRtLmSessionConfig *sessionConfig = litert_lm_session_config_create();
+  if (sessionConfig == nullptr) {
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"session_config_create=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  LiteRtLmSamplerParams samplerParams =
+      LiteRTLMSamplerParamsFromRuntimeConfig(runtimeConfig);
+  litert_lm_session_config_set_max_output_tokens(
+      sessionConfig,
+      (int)LiteRTLMMaxOutputTokensFromRuntimeConfig(runtimeConfig));
+  litert_lm_session_config_set_sampler_params(sessionConfig, &samplerParams);
+
+  // Build the tools JSON schema for the action contract. Even without
+  // constrained decoding this helps the model understand the expected format.
+  static NSString *toolsJSON = nil;
+  static dispatch_once_t toolsOnce;
+  dispatch_once(&toolsOnce, ^{
+    // Gemma 4 Jinja template expects each tool wrapped in {"function": {...}}.
+    NSArray<NSDictionary<NSString *, id> *> *tools = @[
+      @{ @"function": @{ @"name": @"click", @"description": @"Click an element by accessibility ID",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element accessibility ID" } },
+          @"required": @[ @"id" ] } } },
+      @{ @"function": @{ @"name": @"tap_coordinates", @"description": @"Tap at screen coordinates",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"x": @{ @"type": @"number", @"description": @"X coordinate" },
+          @"y": @{ @"type": @"number", @"description": @"Y coordinate" } },
+          @"required": @[ @"x", @"y" ] } } },
+      @{ @"function": @{ @"name": @"type", @"description": @"Type text into an input element",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element accessibility ID" },
+          @"text": @{ @"type": @"string", @"description": @"Text to type" } },
+          @"required": @[ @"id", @"text" ] } } },
+      @{ @"function": @{ @"name": @"scroll", @"description": @"Scroll the page",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"direction": @{ @"type": @"string", @"description": @"up, down, left, or right" },
+          @"amount": @{ @"type": @"string", @"description": @"page, half, or small" } },
+          @"required": @[ @"direction", @"amount" ] } } },
+      @{ @"function": @{ @"name": @"go_back", @"description": @"Navigate back",
+        @"parameters": @{ @"type": @"object", @"properties": @{} } } },
+      @{ @"function": @{ @"name": @"wait", @"description": @"Wait for a condition",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"condition": @{ @"type": @"string", @"description": @"Condition to wait for" } },
+          @"required": @[ @"condition" ] } } },
+      @{ @"function": @{ @"name": @"yield_to_user", @"description": @"Ask the user for help",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"reason": @{ @"type": @"string", @"description": @"Why user input is needed" } },
+          @"required": @[ @"reason" ] } } },
+      @{ @"function": @{ @"name": @"finish", @"description": @"Task is complete",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"status": @{ @"type": @"string", @"description": @"success or failure" },
+          @"message": @{ @"type": @"string", @"description": @"Summary of outcome" } },
+          @"required": @[ @"status", @"message" ] } } },
+    ];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:tools options:0 error:nil];
+    toolsJSON = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+  });
+
+  // Build system message for structured output.
+  static NSString *systemMessageJSON = nil;
+  static dispatch_once_t systemOnce;
+  dispatch_once(&systemOnce, ^{
+    NSDictionary<NSString *, id> *systemMessage = @{
+      @"role": @"system",
+      @"content": @"You are a browser automation agent. You see a screenshot of a webpage and an accessibility tree. "
+                   "Decide the single best next action to achieve the user's goal. "
+                   "Respond with exactly one JSON object: {\"action\": \"<name>\", \"parameters\": {<params>}}. "
+                   "Do not include any text outside the JSON."
+    };
+    NSData *data = [NSJSONSerialization dataWithJSONObject:systemMessage options:0 error:nil];
+    systemMessageJSON = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+  });
+
+  // Build multimodal conversation message with screenshot file path + prompt.
+  // LiteRT-LM's LoadItemData accepts {"type":"image","path":"..."} and
+  // memory-maps the file directly — no base64 encoding needed.
+  NSDictionary<NSString *, id> *message = @{
+    @"role": @"user",
+    @"content": @[
+      @{ @"type": @"image", @"path": screenshotPath },
+      @{ @"type": @"text", @"text": prompt },
+    ],
+  };
+
+  NSData *messageData = [NSJSONSerialization dataWithJSONObject:message options:0 error:nil];
+  if (messageData == nil) {
+    litert_lm_session_config_delete(sessionConfig);
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"Failed to serialize inference message JSON.",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+  NSString *messageJSON = [[NSString alloc] initWithData:messageData encoding:NSUTF8StringEncoding];
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: creating conversation (screenshot=%@, prompt=%luC, tools=%@)",
+          runtimeDiagnostics[@"screenshotBytes"], (unsigned long)prompt.length,
+          toolsJSON != nil ? @"yes" : @"no");
+  }
+
+  // Pass system message and tools schema to the conversation config.
+  // Constrained decoding is disabled because our xcframework has stub
+  // constraint provider symbols. The tools schema still helps the model
+  // understand the expected output format via the prompt context.
+  LiteRtLmConversationConfig *conversationConfig =
+      litert_lm_conversation_config_create(
+          engine, sessionConfig,
+          systemMessageJSON ? systemMessageJSON.UTF8String : nullptr,
+          toolsJSON ? toolsJSON.UTF8String : nullptr,
+          nullptr, false);
+  litert_lm_session_config_delete(sessionConfig);
+
+  if (conversationConfig == nullptr) {
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"conversation_config_create=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  LiteRtLmConversation *conversation =
+      litert_lm_conversation_create(engine, conversationConfig);
+  litert_lm_conversation_config_delete(conversationConfig);
+
+  if (conversation == nullptr) {
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"conversation_create=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: sending multimodal message");
+  }
+
+  LiteRtLmJsonResponse *jsonResponse =
+      litert_lm_conversation_send_message(conversation, messageJSON.UTF8String, nullptr);
+
+  if (jsonResponse == nullptr) {
+    litert_lm_conversation_delete(conversation);
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"conversation_send_message=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  const char *responseCString = litert_lm_json_response_get_string(jsonResponse);
+  NSString *responseJSONString = responseCString != nullptr
+      ? [NSString stringWithUTF8String:responseCString] : nil;
+  id responseObject = LiteRTLMParseJSONObjectFromUTF8(responseCString);
+
+  litert_lm_json_response_delete(jsonResponse);
+  litert_lm_conversation_delete(conversation);
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: raw model output=%@", responseJSONString ?: @"null");
+  }
+
+  if (![responseObject isKindOfClass:[NSDictionary class]]) {
+    if (error != nil) {
+      NSMutableDictionary<NSString *, id> *details = [runtimeDiagnostics mutableCopy];
+      details[@"rawModelOutput"] = responseJSONString ?: @"";
+      details[@"failureClass"] = @"invalid_json";
+      *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
+                             @"Model returned unparseable response.",
+                             details);
+    }
+    return nil;
+  }
+
+  NSDictionary<NSString *, id> *responseDictionary = (NSDictionary<NSString *, id> *)responseObject;
+  NSString *action = nil;
+  NSDictionary<NSString *, id> *parameters = nil;
+
+  // Parse Gemma 4 native tool_calls format:
+  // {"role":"assistant","tool_calls":[{"type":"function","function":{"name":"...","arguments":{...}}}]}
+  NSArray<NSDictionary<NSString *, id> *> *toolCalls = responseDictionary[@"tool_calls"];
+  if ([toolCalls isKindOfClass:[NSArray class]] && toolCalls.count > 0) {
+    NSDictionary<NSString *, id> *firstCall = toolCalls.firstObject;
+    if ([firstCall isKindOfClass:[NSDictionary class]]) {
+      NSDictionary<NSString *, id> *function = firstCall[@"function"];
+      if ([function isKindOfClass:[NSDictionary class]]) {
+        action = function[@"name"];
+        NSDictionary<NSString *, id> *rawArguments = function[@"arguments"];
+        if ([rawArguments isKindOfClass:[NSDictionary class]]) {
+          // Strip Gemma's <|"|> quote markers from string values.
+          NSMutableDictionary<NSString *, id> *cleaned = [NSMutableDictionary dictionary];
+          for (NSString *key in rawArguments) {
+            id value = rawArguments[key];
+            if ([value isKindOfClass:[NSString class]]) {
+              NSString *str = (NSString *)value;
+              str = [str stringByReplacingOccurrencesOfString:@"<|\"|>" withString:@""];
+              cleaned[key] = str;
+            } else {
+              cleaned[key] = value;
+            }
+          }
+          parameters = cleaned;
+        }
+      }
+    }
+  }
+
+  // Fallback: try {"action":"...", "parameters":{...}} format.
+  if (action == nil) {
+    action = responseDictionary[@"action"];
+    parameters = responseDictionary[@"parameters"];
+
+    // Also try extracting text content and parsing as JSON.
+    if (action == nil) {
+      NSString *extractedText = LiteRTLMExtractTextFromResponseObject(responseObject);
+      NSString *textCandidate = [extractedText stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+      if (textCandidate.length > 0) {
+        // Strip code fences.
+        if ([textCandidate hasPrefix:@"```"]) {
+          NSRange firstNewline = [textCandidate rangeOfString:@"\n"];
+          NSRange lastFence = [textCandidate rangeOfString:@"```" options:NSBackwardsSearch];
+          if (firstNewline.location != NSNotFound && lastFence.location > firstNewline.location) {
+            textCandidate = [textCandidate substringWithRange:
+                NSMakeRange(firstNewline.location + 1,
+                            lastFence.location - firstNewline.location - 1)];
+            textCandidate = [textCandidate stringByTrimmingCharactersInSet:
+                [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+          }
+        }
+        NSData *textData = [textCandidate dataUsingEncoding:NSUTF8StringEncoding];
+        id textObject = textData != nil
+            ? [NSJSONSerialization JSONObjectWithData:textData options:0 error:nil] : nil;
+        if ([textObject isKindOfClass:[NSDictionary class]]) {
+          action = ((NSDictionary *)textObject)[@"action"];
+          parameters = ((NSDictionary *)textObject)[@"parameters"];
+        }
+      }
+    }
+  }
+
+  if (![action isKindOfClass:[NSString class]] || ((NSString *)action).length == 0) {
+    if (error != nil) {
+      NSMutableDictionary<NSString *, id> *details = [runtimeDiagnostics mutableCopy];
+      details[@"rawModelOutput"] = responseJSONString ?: @"";
+      details[@"parsedKeys"] = [responseDictionary allKeys] ?: @[];
+      details[@"failureClass"] = @"missing_action";
+      *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
+                             @"Could not extract action from model response.",
+                             details);
+    }
+    return nil;
+  }
+
+  if (![parameters isKindOfClass:[NSDictionary class]]) {
+    parameters = @{};
+  }
+
+  NSNumber *elapsedMs = @((CFAbsoluteTimeGetCurrent() - startedAt) * 1000.0);
+  runtimeDiagnostics[@"coldStart"] = @(coldStart);
+  runtimeDiagnostics[@"elapsedMs"] = elapsedMs;
+  runtimeDiagnostics[@"apiPath"] = @"conversation";
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: action=%@ elapsed=%.0fms", action, elapsedMs.doubleValue);
+  }
+
+  return @{
+    @"action": action,
+    @"parameters": parameters,
+    @"diagnostics": runtimeDiagnostics,
+  };
 }
 
 - (NSDictionary<NSString *, id> *)runTextSmokeTestWithModelPath:(NSString *)modelPath

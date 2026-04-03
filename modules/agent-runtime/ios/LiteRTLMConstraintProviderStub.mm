@@ -1,3 +1,16 @@
+// Stub implementations of the Gemma constraint provider symbols.
+//
+// The vendored LiteRTLMEngine.xcframework references these symbols but does
+// not include the Gemma-specific constrained decoding library. These no-op
+// stubs satisfy the linker. Returning nullptr means enable_constrained_decoding
+// in the Conversation API config must remain false — the conversation will
+// still work, but output is not grammar-constrained. We enforce structured
+// output via native JSON post-validation instead.
+//
+// To enable real constrained decoding, build the xcframework with the
+// gemma_model_constraint_provider target from the LiteRT-LM repo and remove
+// this file.
+
 #include <stddef.h>
 
 extern "C" {
