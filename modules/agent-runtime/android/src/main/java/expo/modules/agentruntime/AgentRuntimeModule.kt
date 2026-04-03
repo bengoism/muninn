@@ -28,6 +28,17 @@ class AgentRuntimeModule : Module() {
       )
     }
 
+    AsyncFunction("runLiteRTLMSmokeTest") { _: String ->
+      mapOf(
+        "ok" to false,
+        "code" to "model_load_failed",
+        "message" to "LiteRT-LM text smoke tests are unavailable on the Android stub.",
+        "details" to null,
+        "retryable" to false,
+        "backend" to "android-stub"
+      )
+    }
+
     AsyncFunction("listAvailableModels") {
       emptyList<Map<String, Any?>>()
     }

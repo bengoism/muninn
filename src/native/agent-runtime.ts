@@ -2,6 +2,7 @@ import AgentRuntimeModule from '../../modules/agent-runtime';
 import type {
   InferenceRequest,
   InferenceResponse,
+  LiteRTLMSmokeTestResponse,
   ModelCatalogEntry,
   ModelStatus,
 } from '../types/agent';
@@ -10,6 +11,12 @@ export async function runInference(
   request: InferenceRequest
 ): Promise<InferenceResponse> {
   return AgentRuntimeModule.runInference(request);
+}
+
+export async function runLiteRTLMSmokeTest(
+  prompt: string
+): Promise<LiteRTLMSmokeTestResponse> {
+  return AgentRuntimeModule.runLiteRTLMSmokeTest(prompt);
 }
 
 export async function listAvailableModels(): Promise<ModelCatalogEntry[]> {

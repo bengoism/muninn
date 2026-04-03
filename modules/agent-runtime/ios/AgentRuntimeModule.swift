@@ -10,6 +10,10 @@ public class AgentRuntimeModule: Module {
       runtimeService.runInference(requestDictionary: request)
     }
 
+    AsyncFunction("runLiteRTLMSmokeTest") { (prompt: String) -> [String: Any] in
+      runtimeService.runLiteRTLMSmokeTest(prompt: prompt)
+    }
+
     AsyncFunction("listAvailableModels") { () -> [[String: Any]] in
       runtimeService.listAvailableModels()
     }

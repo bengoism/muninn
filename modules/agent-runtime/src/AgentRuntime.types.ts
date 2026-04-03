@@ -8,6 +8,8 @@ export type {
   InferenceRequest,
   InferenceResponse,
   InferenceSuccess,
+  LiteRTLMSmokeTestResponse,
+  LiteRTLMSmokeTestSuccess,
   LoopState,
   RuntimeMode,
   ToolName,

@@ -2,7 +2,7 @@ import Foundation
 
 final class AgentRuntimeService {
   private let actionValidator: AgentRuntimeActionValidator
-  private let litertEngine: AgentInferenceEngine
+  private let litertEngine: AgentRuntimeLiteRTLMEngine
   private let modelManager: AgentRuntimeModelManager
   private let promptBuilder: AgentRuntimePromptBuilder
   private let replayEngine: AgentInferenceEngine
@@ -34,6 +34,32 @@ final class AgentRuntimeService {
       )
       let validatedAction = try actionValidator.validate(candidate)
       return validatedAction.asDictionary()
+    } catch let failure as AgentRuntimeFailure {
+      return failure.asDictionary()
+    } catch {
+      return AgentRuntimeFailure(
+        code: .internalError,
+        message: error.localizedDescription,
+        backend: "service"
+      ).asDictionary()
+    }
+  }
+
+  func runLiteRTLMSmokeTest(prompt: String) -> [String: Any] {
+    do {
+      let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+
+      guard !trimmedPrompt.isEmpty else {
+        throw AgentRuntimeFailure(
+          code: .invalidRequest,
+          message: "LiteRT-LM smoke test prompt must not be empty.",
+          backend: "bridge"
+        )
+      }
+
+      return try litertEngine
+        .runLiteRTLMSmokeTest(prompt: trimmedPrompt)
+        .asDictionary()
     } catch let failure as AgentRuntimeFailure {
       return failure.asDictionary()
     } catch {

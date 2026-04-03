@@ -3,6 +3,7 @@ import { registerWebModule, NativeModule } from 'expo';
 import type {
   InferenceRequest,
   InferenceResponse,
+  LiteRTLMSmokeTestResponse,
   ModelCatalogEntry,
   ModelStatus,
 } from './AgentRuntime.types';
@@ -21,6 +22,17 @@ class AgentRuntimeModule extends NativeModule {
         actionHistoryCount: request.actionHistory.length,
         screenshotUri: request.screenshotUri,
       },
+    };
+  }
+
+  async runLiteRTLMSmokeTest(): Promise<LiteRTLMSmokeTestResponse> {
+    return {
+      ok: false,
+      code: 'model_load_failed',
+      message: 'LiteRT-LM text smoke tests are unavailable on the web stub.',
+      details: null,
+      retryable: false,
+      backend: 'web-stub',
     };
   }
 

@@ -100,6 +100,21 @@ struct AgentRuntimeSuccess {
   }
 }
 
+struct AgentRuntimeLiteRTLMSmokeTestSuccess {
+  let text: String
+  let backend: String
+  let diagnostics: [String: Any]?
+
+  func asDictionary() -> [String: Any] {
+    [
+      "ok": true,
+      "text": text,
+      "backend": backend,
+      "diagnostics": diagnostics ?? NSNull()
+    ]
+  }
+}
+
 struct AgentRuntimeModelCatalogEntry {
   let id: String
   let displayName: String
@@ -177,6 +192,48 @@ struct AgentRuntimeFailure: Error {
   }
 }
 
+enum AgentRuntimeLiteRTLMSamplerType: String {
+  case topK = "top_k"
+  case topP = "top_p"
+  case greedy = "greedy"
+}
+
+struct AgentRuntimeLiteRTLMSamplerConfig {
+  let type: AgentRuntimeLiteRTLMSamplerType
+  let topK: Int
+  let topP: Float
+  let temperature: Float
+  let seed: Int
+
+  func asDictionary() -> [String: Any] {
+    [
+      "type": type.rawValue,
+      "topK": NSNumber(value: topK),
+      "topP": NSNumber(value: topP),
+      "temperature": NSNumber(value: temperature),
+      "seed": NSNumber(value: seed)
+    ]
+  }
+}
+
+struct AgentRuntimeLiteRTLMRuntimeConfig {
+  let preferredBackends: [String]
+  let maxNumTokens: Int
+  let maxOutputTokens: Int
+  let sampler: AgentRuntimeLiteRTLMSamplerConfig
+  let enableVerboseNativeLogging: Bool
+
+  func asDictionary() -> [String: Any] {
+    [
+      "preferredBackends": preferredBackends,
+      "maxNumTokens": NSNumber(value: maxNumTokens),
+      "maxOutputTokens": NSNumber(value: maxOutputTokens),
+      "sampler": sampler.asDictionary(),
+      "enableVerboseNativeLogging": enableVerboseNativeLogging
+    ]
+  }
+}
+
 struct AgentRuntimeAllowlistedModel {
   let id: String
   let displayName: String
@@ -184,6 +241,7 @@ struct AgentRuntimeAllowlistedModel {
   let commitHash: String
   let filename: String
   let approximateSizeBytes: Int64
+  let liteRTLMRuntimeConfig: AgentRuntimeLiteRTLMRuntimeConfig
 
   var downloadUrl: URL {
     URL(
@@ -219,7 +277,20 @@ struct AgentRuntimeAllowlistedModel {
     modelId: "litert-community/gemma-4-E2B-it-litert-lm",
     commitHash: "ba27655a791cd872631e8cd9c3521d0a433ba9bf",
     filename: "gemma-4-E2B-it.litertlm",
-    approximateSizeBytes: 2_583_085_056
+    approximateSizeBytes: 2_583_085_056,
+    liteRTLMRuntimeConfig: AgentRuntimeLiteRTLMRuntimeConfig(
+      preferredBackends: ["cpu", "gpu"],
+      maxNumTokens: 4096,
+      maxOutputTokens: 192,
+      sampler: AgentRuntimeLiteRTLMSamplerConfig(
+        type: .topP,
+        topK: 1,
+        topP: 0.95,
+        temperature: 1.0,
+        seed: 0
+      ),
+      enableVerboseNativeLogging: true
+    )
   )
 }
 

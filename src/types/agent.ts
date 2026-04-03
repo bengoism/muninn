@@ -88,6 +88,17 @@ export type InferenceFailure = {
 
 export type InferenceResponse = InferenceSuccess | InferenceFailure;
 
+export type LiteRTLMSmokeTestSuccess = {
+  ok: true;
+  text: string;
+  backend: string;
+  diagnostics: Record<string, unknown> | null;
+};
+
+export type LiteRTLMSmokeTestResponse =
+  | LiteRTLMSmokeTestSuccess
+  | InferenceFailure;
+
 export type ModelCatalogEntry = {
   id: string;
   displayName: string;

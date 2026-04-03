@@ -11,17 +11,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { DEFAULT_AGENT_RUNTIME_MODE } from '../../../config/runtime';
+import {
+  DEFAULT_AGENT_RUNTIME_MODE,
+  DEFAULT_LITERT_LM_SMOKE_TEST_PROMPT,
+} from '../../../config/runtime';
 import {
   downloadModel,
   getModelStatus,
   listAvailableModels,
   runInference,
+  runLiteRTLMSmokeTest,
 } from '../../../native/agent-runtime';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
 import type {
   InferenceResponse,
+  LiteRTLMSmokeTestResponse,
   ModelCatalogEntry,
   ModelStatus,
   ObservationResult,
@@ -108,6 +113,10 @@ export function BrowserScreen() {
   const [isDownloadingModel, setIsDownloadingModel] = useState(false);
   const [isRefreshingModelDiagnostics, setIsRefreshingModelDiagnostics] =
     useState(false);
+  const [isRunningLiteRTLMSmokeTest, setIsRunningLiteRTLMSmokeTest] =
+    useState(false);
+  const [lastLiteRTLMSmokeTestResult, setLastLiteRTLMSmokeTestResult] =
+    useState<LiteRTLMSmokeTestResponse | null>(null);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
     DEFAULT_AGENT_RUNTIME_MODE
@@ -116,6 +125,14 @@ export function BrowserScreen() {
 
   const frames = useMemo(() => Object.values(framesById), [framesById]);
   const primaryModel = availableModels[0] ?? null;
+  const activeModel = useMemo(
+    () => availableModels.find((model) => model.active) ?? null,
+    [availableModels]
+  );
+  const hasDownloadedModel = useMemo(
+    () => availableModels.some((model) => model.downloaded),
+    [availableModels]
+  );
 
   const handleNativeSmokeTest = async () => {
     try {
@@ -211,6 +228,30 @@ export function BrowserScreen() {
       setIsDownloadingModel(false);
     }
   }, [primaryModel, refreshModelDiagnostics]);
+
+  const handleRunLiteRTLMSmokeTest = useCallback(async () => {
+    try {
+      setIsRunningLiteRTLMSmokeTest(true);
+      const response = await runLiteRTLMSmokeTest(
+        DEFAULT_LITERT_LM_SMOKE_TEST_PROMPT
+      );
+      setLastLiteRTLMSmokeTestResult(response);
+    } catch (error) {
+      setLastLiteRTLMSmokeTestResult({
+        ok: false,
+        code: 'internal_error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'LiteRT-LM smoke test failed unexpectedly.',
+        details: null,
+        retryable: false,
+        backend: 'bridge',
+      });
+    } finally {
+      setIsRunningLiteRTLMSmokeTest(false);
+    }
+  }, []);
 
   const handleEvaluatePageTitle = async () => {
     try {
@@ -310,15 +351,11 @@ export function BrowserScreen() {
   ]);
 
   useEffect(() => {
-    if (!showDiagnostics) {
-      return;
-    }
-
     void refreshModelDiagnostics();
-  }, [refreshModelDiagnostics, showDiagnostics]);
+  }, [refreshModelDiagnostics]);
 
   useEffect(() => {
-    if (!showDiagnostics) {
+    if (!showDiagnostics && !modelStatus?.isDownloading) {
       return;
     }
 
@@ -383,6 +420,54 @@ export function BrowserScreen() {
               style={styles.goalInput}
               value={goal}
             />
+          </View>
+
+          <View style={styles.modelInstallCard}>
+            <View style={styles.modelInstallCopy}>
+              <Text style={styles.sectionLabel}>On-Device Model</Text>
+              <Text style={styles.modelInstallTitle}>
+                {formatSimpleModelStatusTitle({
+                  activeModel,
+                  hasDownloadedModel,
+                  isDownloadingModel,
+                  isRefreshing: isRefreshingModelDiagnostics,
+                  modelStatus,
+                  primaryModel,
+                })}
+              </Text>
+              <Text style={styles.modelInstallSubtitle}>
+                {formatSimpleModelStatusSubtitle({
+                  activeModel,
+                  hasDownloadedModel,
+                  isDownloadingModel,
+                  isRefreshing: isRefreshingModelDiagnostics,
+                  modelStatus,
+                  primaryModel,
+                })}
+              </Text>
+            </View>
+
+            {!hasDownloadedModel ? (
+              <DebugButton
+                disabled={
+                  isDownloadingModel ||
+                  modelStatus?.isDownloading === true ||
+                  !primaryModel
+                }
+                label={
+                  isDownloadingModel || modelStatus?.isDownloading
+                    ? 'Downloading model...'
+                    : primaryModel
+                      ? `Download ${primaryModel.displayName}`
+                      : isRefreshingModelDiagnostics
+                        ? 'Checking models...'
+                        : 'No downloadable model'
+                }
+                onPress={handleDownloadModel}
+                tone="primary"
+                wide
+              />
+            ) : null}
           </View>
 
           <View style={styles.sectionHeader}>
@@ -511,6 +596,17 @@ export function BrowserScreen() {
                     tone="quiet"
                     wide
                   />
+                  <DebugButton
+                    disabled={isRunningLiteRTLMSmokeTest}
+                    label={
+                      isRunningLiteRTLMSmokeTest
+                        ? 'Running text smoke test...'
+                        : 'Run LiteRT-LM text smoke test'
+                    }
+                    onPress={handleRunLiteRTLMSmokeTest}
+                    tone="secondary"
+                    wide
+                  />
                 </View>
               </View>
               <StatusCard
@@ -527,6 +623,14 @@ export function BrowserScreen() {
               <StatusCard
                 label="Model status"
                 value={formatModelStatus(modelStatus)}
+              />
+              <StatusCard
+                label="LiteRT-LM smoke test prompt"
+                value={DEFAULT_LITERT_LM_SMOKE_TEST_PROMPT}
+              />
+              <StatusCard
+                label="Last LiteRT-LM smoke test"
+                value={formatLiteRTLMSmokeTestResult(lastLiteRTLMSmokeTestResult)}
               />
               <StatusCard
                 label="Requested source"
@@ -781,6 +885,70 @@ function formatRuntimeModeStatus(
   return `${formatRuntimeModeLabel(runtimeMode)} selected\nRefreshing model diagnostics...`;
 }
 
+function formatSimpleModelStatusTitle(input: {
+  activeModel: ModelCatalogEntry | null;
+  hasDownloadedModel: boolean;
+  isDownloadingModel: boolean;
+  isRefreshing: boolean;
+  modelStatus: ModelStatus | null;
+  primaryModel: ModelCatalogEntry | null;
+}) {
+  if (input.isDownloadingModel || input.modelStatus?.isDownloading) {
+    return 'Downloading Gemma 4 E2B';
+  }
+
+  if (input.hasDownloadedModel) {
+    return input.activeModel
+      ? `${input.activeModel.displayName} is installed`
+      : 'A model is installed';
+  }
+
+  if (input.isRefreshing && input.modelStatus === null) {
+    return 'Checking installed models';
+  }
+
+  if (input.primaryModel) {
+    return `${input.primaryModel.displayName} is not installed`;
+  }
+
+  return 'No model available';
+}
+
+function formatSimpleModelStatusSubtitle(input: {
+  activeModel: ModelCatalogEntry | null;
+  hasDownloadedModel: boolean;
+  isDownloadingModel: boolean;
+  isRefreshing: boolean;
+  modelStatus: ModelStatus | null;
+  primaryModel: ModelCatalogEntry | null;
+}) {
+  if (input.isDownloadingModel || input.modelStatus?.isDownloading) {
+    return `Downloading ${formatBytes(input.modelStatus?.downloadedBytes ?? 0)} of ${formatBytes(input.modelStatus?.totalBytes ?? input.primaryModel?.approximateSizeBytes ?? 0)}.`;
+  }
+
+  if (input.modelStatus?.lastError) {
+    return input.modelStatus.lastError;
+  }
+
+  if (input.hasDownloadedModel) {
+    if (input.activeModel) {
+      return `Ready for LiteRT-LM runs. Active commit: ${input.activeModel.commitHash}.`;
+    }
+
+    return 'Ready for LiteRT-LM runs.';
+  }
+
+  if (input.isRefreshing && input.modelStatus === null) {
+    return 'Checking app storage for previously downloaded models.';
+  }
+
+  if (input.primaryModel) {
+    return `Download the pinned on-device model once, then use it for local LiteRT-LM runs. Size: ${formatBytes(input.primaryModel.approximateSizeBytes)}.`;
+  }
+
+  return 'This runtime does not currently expose a downloadable model.';
+}
+
 function formatModelCatalog(models: ModelCatalogEntry[]) {
   if (models.length === 0) {
     return 'No downloadable models are exposed by this runtime.';
@@ -811,6 +979,29 @@ function formatModelStatus(status: ModelStatus | null) {
     `downloadedBytes=${formatBytes(status.downloadedBytes)}`,
     `totalBytes=${formatBytes(status.totalBytes)}`,
     `lastError=${status.lastError ?? 'None'}`,
+  ].join('\n');
+}
+
+function formatLiteRTLMSmokeTestResult(
+  result: LiteRTLMSmokeTestResponse | null
+) {
+  if (!result) {
+    return 'Not run';
+  }
+
+  if (!result.ok) {
+    return [
+      `failure=${result.code}`,
+      `backend=${result.backend}`,
+      `message=${result.message}`,
+      `details=${formatValue(result.details)}`,
+    ].join('\n');
+  }
+
+  return [
+    `backend=${result.backend}`,
+    `text=${result.text}`,
+    `diagnostics=${formatValue(result.diagnostics)}`,
   ].join('\n');
 }
 
@@ -925,6 +1116,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 8,
     padding: 10,
+  },
+  modelInstallCard: {
+    backgroundColor: '#101927',
+    borderColor: '#17263b',
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 12,
+    padding: 14,
+  },
+  modelInstallCopy: {
+    gap: 6,
+  },
+  modelInstallTitle: {
+    color: '#f8fafc',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  modelInstallSubtitle: {
+    color: '#8ca0bd',
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   sectionHeader: {
     gap: 4,
