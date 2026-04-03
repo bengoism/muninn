@@ -1,8 +1,11 @@
 export type {
   AgentActionRecord,
   AxNode,
+  InferenceFailure,
+  InferenceFailureCode,
   InferenceRequest,
   InferenceResponse,
+  InferenceSuccess,
   LoopState,
   ToolName,
 } from '../../../src/types/agent';

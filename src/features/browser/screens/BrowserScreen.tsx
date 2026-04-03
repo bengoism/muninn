@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { runInference } from '../../../native/agent-runtime';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
-import type { ObservationResult } from '../../../types/agent';
+import type { InferenceResponse, ObservationResult } from '../../../types/agent';
 import { BrowserChrome } from '../components/BrowserChrome';
 import {
   BrowserWebView,
@@ -101,15 +101,30 @@ export function BrowserScreen() {
       setLoopState('reasoning');
       setLastAgentError(null);
 
+      const capture =
+        lastObservationResult?.screenshot ??
+        (await browserRef.current?.captureViewport());
+
+      if (!capture) {
+        throw new Error('Browser host ref was unavailable.');
+      }
+
       const response = await runInference({
         goal,
-        screenshotUri: 'file:///bootstrap-smoke-screenshot.png',
-        axSnapshot: [],
+        screenshotUri: capture.uri,
+        axSnapshot: lastObservationResult?.axSnapshot ?? [],
         actionHistory: [],
       });
 
       setLastNativeResponse(response);
-      setLoopState(mapResponseToLoopState(response.action));
+
+      if (!response.ok) {
+        setLoopState('failed');
+        setLastAgentError(response.message);
+        return;
+      }
+
+      setLoopState(mapResponseToLoopState(response));
     } catch (error) {
       setLoopState('failed');
       setLastNativeResponse(null);
@@ -594,12 +609,16 @@ function formatQuiescenceMetricMeta(result: ObservationResult | null) {
   return `${result.quiescence.observedFrameCount} frame(s) idle before capture`;
 }
 
-function mapResponseToLoopState(action: string) {
-  if (action === 'yield_to_user') {
+function mapResponseToLoopState(response: InferenceResponse) {
+  if (!response.ok) {
+    return 'failed' as const;
+  }
+
+  if (response.action === 'yield_to_user') {
     return 'yielded' as const;
   }
 
-  if (action === 'finish') {
+  if (response.action === 'finish') {
     return 'finished' as const;
   }
 

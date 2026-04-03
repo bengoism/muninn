@@ -14,10 +14,16 @@ class AgentRuntimeModule : Module() {
       val actionHistory = request["actionHistory"] as? List<*> ?: emptyList<Any>()
 
       mapOf(
+        "ok" to true,
         "action" to "finish",
         "parameters" to mapOf(
-          "status" to "stubbed",
+          "status" to "replay",
           "message" to "Native bridge ready for goal '$goal'. Screenshot: $screenshotUri. AX nodes: ${axSnapshot.size}. Prior actions: ${actionHistory.size}."
+        ),
+        "backend" to "android-stub",
+        "diagnostics" to mapOf(
+          "actionHistoryCount" to actionHistory.size,
+          "screenshotUri" to screenshotUri
         )
       )
     }

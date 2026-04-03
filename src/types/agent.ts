@@ -53,10 +53,37 @@ export type InferenceRequest = {
   actionHistory: AgentActionRecord[];
 };
 
-export type InferenceResponse = {
+export type InferenceSuccess = {
+  ok: true;
   action: ToolName;
   parameters: Record<string, unknown>;
+  backend: string;
+  diagnostics: Record<string, unknown> | null;
 };
+
+export type InferenceFailureCode =
+  | 'invalid_request'
+  | 'screenshot_not_found'
+  | 'screenshot_load_failed'
+  | 'model_not_configured'
+  | 'model_load_failed'
+  | 'invalid_model_output'
+  | 'unsupported_action'
+  | 'missing_parameter'
+  | 'memory_pressure'
+  | 'timeout'
+  | 'internal_error';
+
+export type InferenceFailure = {
+  ok: false;
+  code: InferenceFailureCode;
+  message: string;
+  details: Record<string, unknown> | null;
+  retryable: boolean;
+  backend: string;
+};
+
+export type InferenceResponse = InferenceSuccess | InferenceFailure;
 
 export type ViewportCapture = {
   uri: string;
