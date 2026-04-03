@@ -1,0 +1,94 @@
+/**
+ * JavaScript to inject into the page for browser action execution.
+ * Installs window.__MUNINN_ACTIONS__ with click, type, scroll, and
+ * tapCoordinates helpers. Uses data-ai-internal-id attributes assigned
+ * by the observation bridge.
+ */
+export const ACTIONS_INJECTION_SCRIPT = `
+(function() {
+  if (window.__MUNINN_ACTIONS__) return;
+
+  function findById(elementId) {
+    var el = document.querySelector('[data-ai-internal-id="' + elementId + '"]');
+    if (!el) el = document.getElementById(elementId);
+    return el;
+  }
+
+  function dispatchMouseEvents(el) {
+    var rect = el.getBoundingClientRect();
+    var cx = rect.left + rect.width / 2;
+    var cy = rect.top + rect.height / 2;
+    var opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
+    el.dispatchEvent(new MouseEvent('click', opts));
+  }
+
+  window.__MUNINN_ACTIONS__ = {
+    click: function(elementId) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      dispatchMouseEvents(el);
+      return { ok: true, reason: null };
+    },
+
+    tapCoordinates: function(x, y) {
+      var el = document.elementFromPoint(x, y);
+      if (!el) return { ok: false, reason: 'No element at (' + x + ', ' + y + ')' };
+      dispatchMouseEvents(el);
+      return { ok: true, reason: null };
+    },
+
+    type: function(elementId, text) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      el.focus();
+      try {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          var nativeSetter = Object.getOwnPropertyDescriptor(
+            Object.getPrototypeOf(el).constructor.prototype, 'value'
+          );
+          if (nativeSetter && nativeSetter.set) {
+            nativeSetter.set.call(el, text);
+          } else {
+            el.value = text;
+          }
+        } else if ('value' in el) {
+          el.value = text;
+        } else {
+          el.textContent = text;
+        }
+      } catch (e) {
+        // Fallback: simulate typing character by character via keyboard events.
+        for (var i = 0; i < text.length; i++) {
+          var ch = text[i];
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
+        }
+        // Also try direct assignment as last resort.
+        try { el.value = text; } catch (_) {}
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, reason: null };
+    },
+
+    scroll: function(direction, amount) {
+      var distances = {
+        page: 600, half: 300, small: 100
+      };
+      var px = distances[amount] || 300;
+      var dx = 0, dy = 0;
+      if (direction === 'down') dy = px;
+      else if (direction === 'up') dy = -px;
+      else if (direction === 'right') dx = px;
+      else if (direction === 'left') dx = -px;
+      window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+      return { ok: true, reason: null };
+    }
+  };
+})();
+`;

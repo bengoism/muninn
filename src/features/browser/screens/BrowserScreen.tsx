@@ -22,6 +22,8 @@ import {
   runInference,
   runLiteRTLMSmokeTest,
 } from '../../../native/agent-runtime';
+import { GoalBar } from '../components/GoalBar';
+import { useAgentLoop } from '../loop/use-agent-loop';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
 import type {
@@ -99,7 +101,6 @@ export function BrowserScreen() {
   );
   const setLastAgentError = useAgentSessionStore((state) => state.setLastError);
 
-  const [isRunningSmokeTest, setIsRunningSmokeTest] = useState(false);
   const [isRunningEvaluation, setIsRunningEvaluation] = useState(false);
   const [isRunningObservation, setIsRunningObservation] = useState(false);
   const [lastEvaluationResult, setLastEvaluationResult] =
@@ -123,6 +124,9 @@ export function BrowserScreen() {
   );
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
+  const agentLoop = useAgentLoop(browserRef, runtimeMode);
+  const stepCount = useAgentSessionStore((state) => state.stepCount);
+
   const frames = useMemo(() => Object.values(framesById), [framesById]);
   const primaryModel = availableModels[0] ?? null;
   const activeModel = useMemo(
@@ -133,48 +137,6 @@ export function BrowserScreen() {
     () => availableModels.some((model) => model.downloaded),
     [availableModels]
   );
-
-  const handleNativeSmokeTest = async () => {
-    try {
-      setIsRunningSmokeTest(true);
-      setLoopState('reasoning');
-      setLastAgentError(null);
-
-      const capture =
-        lastObservationResult?.screenshot ??
-        (await browserRef.current?.captureViewport());
-
-      if (!capture) {
-        throw new Error('Browser host ref was unavailable.');
-      }
-
-      const response = await runInference({
-        goal,
-        screenshotUri: capture.uri,
-        axSnapshot: lastObservationResult?.axSnapshot ?? [],
-        actionHistory: [],
-        runtimeMode,
-      });
-
-      setLastNativeResponse(response);
-
-      if (!response.ok) {
-        setLoopState('failed');
-        setLastAgentError(response.message);
-        return;
-      }
-
-      setLoopState(mapResponseToLoopState(response));
-    } catch (error) {
-      setLoopState('failed');
-      setLastNativeResponse(null);
-      setLastAgentError(
-        error instanceof Error ? error.message : 'Native smoke test failed.'
-      );
-    } finally {
-      setIsRunningSmokeTest(false);
-    }
-  };
 
   const refreshModelDiagnostics = useCallback(async () => {
     if (modelDiagnosticsRefreshInFlightRef.current) {
@@ -374,27 +336,53 @@ export function BrowserScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.screen}
     >
-      <SafeAreaView edges={['top']} style={styles.container}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
         <BrowserChrome
           telemetryReady={telemetryReady}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           currentUrl={currentUrl}
           isLoading={isLoading}
+          modelName={activeModel?.displayName ?? null}
           onGoBack={() => browserRef.current?.goBack()}
           onGoForward={() => browserRef.current?.goForward()}
           onLoadFixture={() => setRequestedUrl(BRIDGE_FIXTURE_URL)}
           onReload={() => browserRef.current?.reload()}
           onSubmitUrl={setRequestedUrl}
+          onToggleDiagnostics={() => setShowDiagnostics((v) => !v)}
           progress={progress}
           requestedUrl={requestedUrl}
           title={title}
         />
 
+        <View style={styles.webviewFrame}>
+          <BrowserWebView
+            onLoadStart={handleBrowserLoadStart}
+            onNavigationError={setNavigationError}
+            onNavigationStateChange={applyNavigationState}
+            onProgressChange={setProgress}
+            onTelemetryMessage={handleTelemetryMessage}
+            onTelemetryProtocolError={handleTelemetryProtocolError}
+            ref={browserRef}
+            requestedUrl={requestedUrl}
+          />
+        </View>
+
+        <GoalBar
+          onStart={(g) => agentLoop.start(g)}
+          onCancel={agentLoop.cancel}
+          isRunning={agentLoop.isRunning}
+          currentStep={stepCount}
+          modelReady={hasDownloadedModel}
+          onDownloadModel={handleDownloadModel}
+          isDownloading={isDownloadingModel}
+        />
+
+        {showDiagnostics && (
         <ScrollView
           contentContainerStyle={styles.panelContent}
           keyboardShouldPersistTaps="handled"
-          style={styles.panel}
+          style={styles.diagnosticsPanel}
         >
           <View style={styles.panelHeader}>
             <View>
@@ -494,15 +482,19 @@ export function BrowserScreen() {
               onPress={handleEvaluatePageTitle}
               tone="secondary"
             />
-            <DebugButton
-              label={
-                isRunningSmokeTest
-                  ? `Running ${formatRuntimeModeLabel(runtimeMode)}...`
-                  : `Run ${formatRuntimeModeLabel(runtimeMode)}`
-              }
-              onPress={handleNativeSmokeTest}
-              tone="quiet"
-            />
+            {agentLoop.isRunning ? (
+              <DebugButton
+                label={`Cancel (step ${stepCount})`}
+                onPress={agentLoop.cancel}
+                tone="quiet"
+              />
+            ) : (
+              <DebugButton
+                label={`Start Agent (${formatRuntimeModeLabel(runtimeMode)})`}
+                onPress={() => agentLoop.start(goal)}
+                tone="quiet"
+              />
+            )}
           </View>
 
           <View style={styles.summaryGrid}>
@@ -679,19 +671,7 @@ export function BrowserScreen() {
             </View>
           ) : null}
         </ScrollView>
-
-        <View style={styles.webviewFrame}>
-          <BrowserWebView
-            onLoadStart={handleBrowserLoadStart}
-            onNavigationError={setNavigationError}
-            onNavigationStateChange={applyNavigationState}
-            onProgressChange={setProgress}
-            onTelemetryMessage={handleTelemetryMessage}
-            onTelemetryProtocolError={handleTelemetryProtocolError}
-            ref={browserRef}
-            requestedUrl={requestedUrl}
-          />
-        </View>
+        )}
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -1066,6 +1046,11 @@ const styles = StyleSheet.create({
     maxHeight: 292,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#17263b',
+  },
+  diagnosticsPanel: {
+    maxHeight: 300,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#17263b',
   },
   panelContent: {
     gap: 10,

@@ -20,7 +20,9 @@ final class AgentRuntimePromptBuilder {
   ) -> String {
     var parts: [String] = []
 
-    parts.append("You are a browser agent. You see a screenshot of a webpage and must decide the next action to achieve the user's goal.")
+    parts.append("You are a browser agent. You see a screenshot of a webpage and must decide the single next action to achieve the user's goal.")
+    parts.append("If the goal has already been achieved based on what you see, call finish(status: \"success\", message: \"...\").")
+    parts.append("Do not keep taking actions after the goal is complete.")
     parts.append("")
     parts.append("Goal: \(request.goal)")
     parts.append("")
@@ -35,8 +37,9 @@ final class AgentRuntimePromptBuilder {
     }
 
     if !request.actionHistory.isEmpty {
-      parts.append("Recent actions:")
+      parts.append("Actions already taken (most recent last):")
       parts.append(buildActionHistory(request.actionHistory))
+      parts.append("If these actions already achieved the goal, call finish.")
       parts.append("")
     }
 
@@ -76,7 +79,20 @@ final class AgentRuntimePromptBuilder {
     let lines: [String] = recent.compactMap { entry in
       let action = entry["action"] as? String ?? "unknown"
       let status = entry["status"] as? String ?? ""
-      return "  - \(action) → \(status)"
+      let params = entry["parameters"] as? [String: Any] ?? [:]
+      let urlBefore = entry["urlBefore"] as? String
+      let urlAfter = entry["urlAfter"] as? String
+
+      var paramSummary = params.map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
+      if !paramSummary.isEmpty { paramSummary = "(\(paramSummary))" }
+
+      var line = "  - \(action)\(paramSummary) → \(status)"
+
+      if let before = urlBefore, let after = urlAfter, before != after {
+        line += " (page navigated from \(before) to \(after))"
+      }
+
+      return line
     }
     return lines.joined(separator: "\n")
   }
