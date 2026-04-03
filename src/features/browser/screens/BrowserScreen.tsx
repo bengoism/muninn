@@ -11,10 +11,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { runInference } from '../../../native/agent-runtime';
+import { DEFAULT_AGENT_RUNTIME_MODE } from '../../../config/runtime';
+import {
+  downloadModel,
+  getModelStatus,
+  listAvailableModels,
+  runInference,
+} from '../../../native/agent-runtime';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
-import type { InferenceResponse, ObservationResult } from '../../../types/agent';
+import type {
+  InferenceResponse,
+  ModelCatalogEntry,
+  ModelStatus,
+  ObservationResult,
+  RuntimeMode,
+} from '../../../types/agent';
 import { BrowserChrome } from '../components/BrowserChrome';
 import {
   BrowserWebView,
@@ -30,6 +42,7 @@ import type {
 export function BrowserScreen() {
   const browserRef = useRef<BrowserWebViewHandle>(null);
   const autoObservationRequestedRef = useRef(false);
+  const modelDiagnosticsRefreshInFlightRef = useRef(false);
 
   const requestedUrl = useBrowserStore((state) => state.requestedUrl);
   const currentUrl = useBrowserStore((state) => state.currentUrl);
@@ -91,9 +104,18 @@ export function BrowserScreen() {
   const [lastObservationError, setLastObservationError] = useState<string | null>(
     null
   );
+  const [availableModels, setAvailableModels] = useState<ModelCatalogEntry[]>([]);
+  const [isDownloadingModel, setIsDownloadingModel] = useState(false);
+  const [isRefreshingModelDiagnostics, setIsRefreshingModelDiagnostics] =
+    useState(false);
+  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
+    DEFAULT_AGENT_RUNTIME_MODE
+  );
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const frames = useMemo(() => Object.values(framesById), [framesById]);
+  const primaryModel = availableModels[0] ?? null;
 
   const handleNativeSmokeTest = async () => {
     try {
@@ -114,6 +136,7 @@ export function BrowserScreen() {
         screenshotUri: capture.uri,
         axSnapshot: lastObservationResult?.axSnapshot ?? [],
         actionHistory: [],
+        runtimeMode,
       });
 
       setLastNativeResponse(response);
@@ -135,6 +158,59 @@ export function BrowserScreen() {
       setIsRunningSmokeTest(false);
     }
   };
+
+  const refreshModelDiagnostics = useCallback(async () => {
+    if (modelDiagnosticsRefreshInFlightRef.current) {
+      return;
+    }
+
+    try {
+      modelDiagnosticsRefreshInFlightRef.current = true;
+      setIsRefreshingModelDiagnostics(true);
+
+      const [nextAvailableModels, nextModelStatus] = await Promise.all([
+        listAvailableModels(),
+        getModelStatus(),
+      ]);
+
+      setAvailableModels(nextAvailableModels);
+      setModelStatus(nextModelStatus);
+    } catch (error) {
+      setModelStatus((current) =>
+        buildModelStatusError(
+          error instanceof Error
+            ? error.message
+            : 'Model diagnostics could not be refreshed.',
+          current
+        )
+      );
+    } finally {
+      modelDiagnosticsRefreshInFlightRef.current = false;
+      setIsRefreshingModelDiagnostics(false);
+    }
+  }, []);
+
+  const handleDownloadModel = useCallback(async () => {
+    if (!primaryModel) {
+      return;
+    }
+
+    try {
+      setIsDownloadingModel(true);
+      const nextStatus = await downloadModel(primaryModel.id);
+      setModelStatus(nextStatus);
+      await refreshModelDiagnostics();
+    } catch (error) {
+      setModelStatus((current) =>
+        buildModelStatusError(
+          error instanceof Error ? error.message : 'Model download failed.',
+          current
+        )
+      );
+    } finally {
+      setIsDownloadingModel(false);
+    }
+  }, [primaryModel, refreshModelDiagnostics]);
 
   const handleEvaluatePageTitle = async () => {
     try {
@@ -233,6 +309,29 @@ export function BrowserScreen() {
     telemetryReady,
   ]);
 
+  useEffect(() => {
+    if (!showDiagnostics) {
+      return;
+    }
+
+    void refreshModelDiagnostics();
+  }, [refreshModelDiagnostics, showDiagnostics]);
+
+  useEffect(() => {
+    if (!showDiagnostics) {
+      return;
+    }
+
+    const intervalMs = modelStatus?.isDownloading ? 1_500 : 6_000;
+    const interval = setInterval(() => {
+      void refreshModelDiagnostics();
+    }, intervalMs);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [modelStatus?.isDownloading, refreshModelDiagnostics, showDiagnostics]);
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -312,7 +411,9 @@ export function BrowserScreen() {
             />
             <DebugButton
               label={
-                isRunningSmokeTest ? 'Running native stub...' : 'Run native stub'
+                isRunningSmokeTest
+                  ? `Running ${formatRuntimeModeLabel(runtimeMode)}...`
+                  : `Run ${formatRuntimeModeLabel(runtimeMode)}`
               }
               onPress={handleNativeSmokeTest}
               tone="quiet"
@@ -376,6 +477,57 @@ export function BrowserScreen() {
 
           {showDiagnostics ? (
             <View style={styles.detailStack}>
+              <View style={styles.statusCard}>
+                <Text style={styles.statusCardLabel}>Runtime Controls</Text>
+                <Text style={styles.sectionCaption}>
+                  Toggle the inference backend and install the pinned Gemma 4
+                  model for LiteRT-LM runs.
+                </Text>
+                <View style={styles.buttonRow}>
+                  <DebugButton
+                    label="Replay"
+                    onPress={() => setRuntimeMode('replay')}
+                    tone={runtimeMode === 'replay' ? 'primary' : 'secondary'}
+                  />
+                  <DebugButton
+                    label="LiteRT-LM"
+                    onPress={() => setRuntimeMode('litertlm')}
+                    tone={runtimeMode === 'litertlm' ? 'primary' : 'secondary'}
+                  />
+                  <DebugButton
+                    disabled={
+                      isDownloadingModel ||
+                      modelStatus?.isDownloading === true ||
+                      !primaryModel
+                    }
+                    label={
+                      isDownloadingModel || modelStatus?.isDownloading
+                        ? 'Downloading model...'
+                        : primaryModel
+                          ? `Download ${primaryModel.displayName}`
+                          : 'No downloadable model'
+                    }
+                    onPress={handleDownloadModel}
+                    tone="quiet"
+                    wide
+                  />
+                </View>
+              </View>
+              <StatusCard
+                label="Runtime mode"
+                value={formatRuntimeModeStatus(
+                  runtimeMode,
+                  isRefreshingModelDiagnostics
+                )}
+              />
+              <StatusCard
+                label="Model catalog"
+                value={formatModelCatalog(availableModels)}
+              />
+              <StatusCard
+                label="Model status"
+                value={formatModelStatus(modelStatus)}
+              />
               <StatusCard
                 label="Requested source"
                 value={requestedUrl}
@@ -442,6 +594,7 @@ export function BrowserScreen() {
 }
 
 type DebugButtonProps = {
+  disabled?: boolean;
   label: string;
   onPress: () => void;
   tone?: 'primary' | 'secondary' | 'quiet';
@@ -449,6 +602,7 @@ type DebugButtonProps = {
 };
 
 function DebugButton({
+  disabled = false,
   label,
   onPress,
   tone = 'secondary',
@@ -456,13 +610,15 @@ function DebugButton({
 }: DebugButtonProps) {
   return (
     <Pressable
-      onPress={onPress}
+      disabled={disabled}
+      onPress={disabled ? undefined : onPress}
       style={({ pressed }) => [
         styles.actionButton,
         tone === 'primary' ? styles.actionButtonPrimary : null,
         tone === 'secondary' ? styles.actionButtonSecondary : null,
         tone === 'quiet' ? styles.actionButtonQuiet : null,
         wide ? styles.actionButtonWide : null,
+        disabled ? styles.actionButtonDisabled : null,
         pressed ? styles.actionButtonPressed : null,
       ]}
     >
@@ -471,6 +627,7 @@ function DebugButton({
           styles.actionButtonText,
           tone === 'primary' ? styles.actionButtonPrimaryText : null,
           tone === 'quiet' ? styles.actionButtonQuietText : null,
+          disabled ? styles.actionButtonDisabledText : null,
         ]}
       >
         {label}
@@ -607,6 +764,86 @@ function formatQuiescenceMetricMeta(result: ObservationResult | null) {
   }
 
   return `${result.quiescence.observedFrameCount} frame(s) idle before capture`;
+}
+
+function formatRuntimeModeLabel(runtimeMode: RuntimeMode) {
+  return runtimeMode === 'litertlm' ? 'LiteRT-LM' : 'Replay';
+}
+
+function formatRuntimeModeStatus(
+  runtimeMode: RuntimeMode,
+  isRefreshing: boolean
+) {
+  if (!isRefreshing) {
+    return `${formatRuntimeModeLabel(runtimeMode)} selected`;
+  }
+
+  return `${formatRuntimeModeLabel(runtimeMode)} selected\nRefreshing model diagnostics...`;
+}
+
+function formatModelCatalog(models: ModelCatalogEntry[]) {
+  if (models.length === 0) {
+    return 'No downloadable models are exposed by this runtime.';
+  }
+
+  return models
+    .map((model) =>
+      [
+        model.displayName,
+        `id=${model.id}`,
+        model.active ? 'active' : 'inactive',
+        model.downloaded ? 'downloaded' : 'not-downloaded',
+        `size=${formatBytes(model.approximateSizeBytes)}`,
+      ].join(' | ')
+    )
+    .join('\n');
+}
+
+function formatModelStatus(status: ModelStatus | null) {
+  if (!status) {
+    return 'Not fetched';
+  }
+
+  return [
+    `activeModelId=${status.activeModelId ?? 'None'}`,
+    `activeCommitHash=${status.activeCommitHash ?? 'None'}`,
+    `isDownloading=${status.isDownloading ? 'yes' : 'no'}`,
+    `downloadedBytes=${formatBytes(status.downloadedBytes)}`,
+    `totalBytes=${formatBytes(status.totalBytes)}`,
+    `lastError=${status.lastError ?? 'None'}`,
+  ].join('\n');
+}
+
+function buildModelStatusError(
+  message: string,
+  current: ModelStatus | null
+): ModelStatus {
+  return {
+    activeModelId: current?.activeModelId ?? null,
+    activeCommitHash: current?.activeCommitHash ?? null,
+    isDownloading: current?.isDownloading ?? false,
+    downloadedBytes: current?.downloadedBytes ?? 0,
+    totalBytes: current?.totalBytes ?? 0,
+    lastError: message,
+  };
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes || bytes <= 0) {
+    return '0 B';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let unitIndex = 0;
+  let value = bytes;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const digits = unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
 }
 
 function mapResponseToLoopState(response: InferenceResponse) {
@@ -746,6 +983,9 @@ const styles = StyleSheet.create({
   actionButtonPressed: {
     opacity: 0.85,
   },
+  actionButtonDisabled: {
+    opacity: 0.55,
+  },
   actionButtonText: {
     color: '#e2e8f0',
     fontSize: 14,
@@ -757,6 +997,9 @@ const styles = StyleSheet.create({
   },
   actionButtonQuietText: {
     color: '#cbd5e1',
+  },
+  actionButtonDisabledText: {
+    color: '#94a3b8',
   },
   statusGrid: {
     gap: 12,

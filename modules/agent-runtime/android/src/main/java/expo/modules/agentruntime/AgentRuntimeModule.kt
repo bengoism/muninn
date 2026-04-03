@@ -27,5 +27,31 @@ class AgentRuntimeModule : Module() {
         )
       )
     }
+
+    AsyncFunction("listAvailableModels") {
+      emptyList<Map<String, Any?>>()
+    }
+
+    AsyncFunction("getModelStatus") {
+      mapOf(
+        "activeModelId" to null,
+        "activeCommitHash" to null,
+        "isDownloading" to false,
+        "downloadedBytes" to 0,
+        "totalBytes" to 0,
+        "lastError" to "Model downloads are unavailable on the Android stub."
+      )
+    }
+
+    AsyncFunction("downloadModel") { _: String ->
+      mapOf(
+        "activeModelId" to null,
+        "activeCommitHash" to null,
+        "isDownloading" to false,
+        "downloadedBytes" to 0,
+        "totalBytes" to 0,
+        "lastError" to "Model downloads are unavailable on the Android stub."
+      )
+    }
   }
 }

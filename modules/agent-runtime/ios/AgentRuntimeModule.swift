@@ -9,5 +9,17 @@ public class AgentRuntimeModule: Module {
     AsyncFunction("runInference") { (request: [String: Any]) -> [String: Any] in
       runtimeService.runInference(requestDictionary: request)
     }
+
+    AsyncFunction("listAvailableModels") { () -> [[String: Any]] in
+      runtimeService.listAvailableModels()
+    }
+
+    AsyncFunction("getModelStatus") { () -> [String: Any] in
+      runtimeService.getModelStatus()
+    }
+
+    AsyncFunction("downloadModel") { (modelId: String) -> [String: Any] in
+      runtimeService.downloadModel(modelId: modelId)
+    }
   }
 }

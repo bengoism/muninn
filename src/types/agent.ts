@@ -8,6 +8,8 @@ export type ToolName =
   | 'yield_to_user'
   | 'finish';
 
+export type RuntimeMode = 'replay' | 'litertlm';
+
 export type Bounds = {
   x: number;
   y: number;
@@ -51,6 +53,7 @@ export type InferenceRequest = {
   screenshotUri: string;
   axSnapshot: AxNode[];
   actionHistory: AgentActionRecord[];
+  runtimeMode: RuntimeMode;
 };
 
 export type InferenceSuccess = {
@@ -84,6 +87,26 @@ export type InferenceFailure = {
 };
 
 export type InferenceResponse = InferenceSuccess | InferenceFailure;
+
+export type ModelCatalogEntry = {
+  id: string;
+  displayName: string;
+  modelId: string;
+  commitHash: string;
+  filename: string;
+  approximateSizeBytes: number;
+  downloaded: boolean;
+  active: boolean;
+};
+
+export type ModelStatus = {
+  activeModelId: string | null;
+  activeCommitHash: string | null;
+  isDownloading: boolean;
+  downloadedBytes: number;
+  totalBytes: number;
+  lastError: string | null;
+};
 
 export type ViewportCapture = {
   uri: string;

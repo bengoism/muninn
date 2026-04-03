@@ -3,10 +3,13 @@ export type {
   AxNode,
   InferenceFailure,
   InferenceFailureCode,
+  ModelCatalogEntry,
+  ModelStatus,
   InferenceRequest,
   InferenceResponse,
   InferenceSuccess,
   LoopState,
+  RuntimeMode,
   ToolName,
 } from '../../../src/types/agent';
 

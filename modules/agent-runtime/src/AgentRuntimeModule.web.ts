@@ -1,6 +1,11 @@
 import { registerWebModule, NativeModule } from 'expo';
 
-import type { InferenceRequest, InferenceResponse } from './AgentRuntime.types';
+import type {
+  InferenceRequest,
+  InferenceResponse,
+  ModelCatalogEntry,
+  ModelStatus,
+} from './AgentRuntime.types';
 
 class AgentRuntimeModule extends NativeModule {
   async runInference(request: InferenceRequest): Promise<InferenceResponse> {
@@ -17,6 +22,25 @@ class AgentRuntimeModule extends NativeModule {
         screenshotUri: request.screenshotUri,
       },
     };
+  }
+
+  async listAvailableModels(): Promise<ModelCatalogEntry[]> {
+    return [];
+  }
+
+  async getModelStatus(): Promise<ModelStatus> {
+    return {
+      activeModelId: null,
+      activeCommitHash: null,
+      isDownloading: false,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      lastError: 'Model downloads are unavailable on the web stub.',
+    };
+  }
+
+  async downloadModel(): Promise<ModelStatus> {
+    return this.getModelStatus();
   }
 }
 

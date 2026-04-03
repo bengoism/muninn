@@ -1,5 +1,10 @@
 import Foundation
 
+enum RuntimeMode: String {
+  case replay = "replay"
+  case litertlm = "litertlm"
+}
+
 enum InferenceFailureCode: String {
   case invalidRequest = "invalid_request"
   case screenshotNotFound = "screenshot_not_found"
@@ -20,6 +25,7 @@ struct AgentRuntimeRequest {
   let screenshotUrl: URL
   let axSnapshot: [[String: Any]]
   let actionHistory: [[String: Any]]
+  let runtimeMode: RuntimeMode
 
   init(dictionary: [String: Any]) throws {
     guard let goal = dictionary["goal"] as? String else {
@@ -49,11 +55,25 @@ struct AgentRuntimeRequest {
       )
     }
 
+    let runtimeModeValue = dictionary["runtimeMode"] as? String ?? RuntimeMode.replay.rawValue
+
+    guard let runtimeMode = RuntimeMode(rawValue: runtimeModeValue) else {
+      throw AgentRuntimeFailure(
+        code: .invalidRequest,
+        message: "The inference request must provide a supported runtimeMode.",
+        details: [
+          "runtimeMode": runtimeModeValue
+        ],
+        backend: "bridge"
+      )
+    }
+
     self.goal = goal
     self.screenshotUri = screenshotUri
     self.screenshotUrl = screenshotUrl
     self.axSnapshot = dictionary["axSnapshot"] as? [[String: Any]] ?? []
     self.actionHistory = dictionary["actionHistory"] as? [[String: Any]] ?? []
+    self.runtimeMode = runtimeMode
   }
 }
 
@@ -76,6 +96,50 @@ struct AgentRuntimeSuccess {
       "parameters": parameters,
       "backend": backend,
       "diagnostics": diagnostics ?? NSNull()
+    ]
+  }
+}
+
+struct AgentRuntimeModelCatalogEntry {
+  let id: String
+  let displayName: String
+  let modelId: String
+  let commitHash: String
+  let filename: String
+  let approximateSizeBytes: Int64
+  let downloaded: Bool
+  let active: Bool
+
+  func asDictionary() -> [String: Any] {
+    [
+      "id": id,
+      "displayName": displayName,
+      "modelId": modelId,
+      "commitHash": commitHash,
+      "filename": filename,
+      "approximateSizeBytes": NSNumber(value: approximateSizeBytes),
+      "downloaded": downloaded,
+      "active": active
+    ]
+  }
+}
+
+struct AgentRuntimeModelStatus {
+  let activeModelId: String?
+  let activeCommitHash: String?
+  let isDownloading: Bool
+  let downloadedBytes: Int64
+  let totalBytes: Int64
+  let lastError: String?
+
+  func asDictionary() -> [String: Any] {
+    [
+      "activeModelId": activeModelId ?? NSNull(),
+      "activeCommitHash": activeCommitHash ?? NSNull(),
+      "isDownloading": isDownloading,
+      "downloadedBytes": NSNumber(value: downloadedBytes),
+      "totalBytes": NSNumber(value: totalBytes),
+      "lastError": lastError ?? NSNull()
     ]
   }
 }
@@ -111,4 +175,73 @@ struct AgentRuntimeFailure: Error {
       "backend": backend
     ]
   }
+}
+
+struct AgentRuntimeAllowlistedModel {
+  let id: String
+  let displayName: String
+  let modelId: String
+  let commitHash: String
+  let filename: String
+  let approximateSizeBytes: Int64
+
+  var downloadUrl: URL {
+    URL(
+      string:
+        "https://huggingface.co/\(modelId)/resolve/\(commitHash)/\(filename)?download=true"
+    )!
+  }
+
+  var sanitizedModelId: String {
+    id.replacingOccurrences(
+      of: "[^A-Za-z0-9_-]",
+      with: "_",
+      options: .regularExpression
+    )
+  }
+
+  func asCatalogEntry(downloaded: Bool, active: Bool) -> AgentRuntimeModelCatalogEntry {
+    AgentRuntimeModelCatalogEntry(
+      id: id,
+      displayName: displayName,
+      modelId: modelId,
+      commitHash: commitHash,
+      filename: filename,
+      approximateSizeBytes: approximateSizeBytes,
+      downloaded: downloaded,
+      active: active
+    )
+  }
+
+  static let gemma4E2B = AgentRuntimeAllowlistedModel(
+    id: "gemma-4-e2b-it",
+    displayName: "Gemma 4 E2B",
+    modelId: "litert-community/gemma-4-E2B-it-litert-lm",
+    commitHash: "ba27655a791cd872631e8cd9c3521d0a433ba9bf",
+    filename: "gemma-4-E2B-it.litertlm",
+    approximateSizeBytes: 2_583_085_056
+  )
+}
+
+struct AgentRuntimeModelState: Codable {
+  var activeModelId: String?
+  var activeCommitHash: String?
+}
+
+struct AgentRuntimeInstallMetadata: Codable {
+  let id: String
+  let displayName: String
+  let modelId: String
+  let commitHash: String
+  let filename: String
+  let approximateSizeBytes: Int64
+  let installedBytes: Int64
+  let installedAt: String
+}
+
+struct AgentRuntimeModelInstallation {
+  let model: AgentRuntimeAllowlistedModel
+  let installDirectoryURL: URL
+  let modelFileURL: URL
+  let metadataURL: URL
 }
