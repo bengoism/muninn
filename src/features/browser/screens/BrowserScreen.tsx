@@ -22,7 +22,6 @@ import {
   runInference,
   runLiteRTLMSmokeTest,
 } from '../../../native/agent-runtime';
-import { GoalBar } from '../components/GoalBar';
 import { useAgentLoop } from '../loop/use-agent-loop';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
