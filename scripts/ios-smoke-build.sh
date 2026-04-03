@@ -28,4 +28,6 @@ xcodebuild \
   -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO \
+  ONLY_ACTIVE_ARCH=NO \
+  ARCHS=arm64 \
   build

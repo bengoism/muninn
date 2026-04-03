@@ -3,9 +3,6 @@
 #include <string.h>
 
 static NSString *const LiteRTLMAdapterErrorDomain = @"AgentRuntimeLiteRTLMAdapter";
-static NSString *const LiteRTLMStructuredInferenceHint =
-    @"Text smoke tests are now wired through the LiteRT-LM C API. "
-     "Structured browser-action inference is intentionally still disabled in this slice.";
 
 typedef NS_ENUM(NSInteger, LiteRTLMAdapterErrorCode) {
   LiteRTLMAdapterErrorRuntimeUnavailable = 501,
@@ -414,7 +411,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
       LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
           modelPath.fileSystemRepresentation,
           backend.UTF8String,
-          nullptr,
+          backend.UTF8String,
           nullptr);
       if (settings == nullptr) {
         if (error != nil) {
@@ -503,21 +500,221 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
                                              screenshotPath:(NSString *)screenshotPath
                                                 axNodeCount:(NSNumber *)axNodeCount
                                                       error:(NSError * _Nullable __autoreleasing *)error {
-  if (error != nil) {
-    NSMutableDictionary<NSString *, id> *details =
-        [LiteRTLMRuntimeConfigDiagnostics(runtimeConfig) mutableCopy];
-    details[@"hint"] = LiteRTLMStructuredInferenceHint;
-    details[@"modelPath"] = modelPath ?: @"";
-    details[@"promptLength"] = @(prompt.length);
-    details[@"goalLength"] = @(goal.length);
-    details[@"screenshotPath"] = screenshotPath ?: @"";
-    details[@"axNodeCount"] = axNodeCount ?: @0;
-    *error = LiteRTLMError(LiteRTLMAdapterErrorRuntimeUnavailable,
-                           @"Structured browser-action inference is not wired yet.",
-                           details);
+  const CFAbsoluteTime startedAt = CFAbsoluteTimeGetCurrent();
+  BOOL verboseNativeLogging =
+      LiteRTLMVerboseNativeLoggingFromRuntimeConfig(runtimeConfig);
+  BOOL coldStart = NO;
+
+  LiteRtLmEngine *engine = [self ensureEngineWithModelPath:modelPath
+                                             runtimeConfig:runtimeConfig
+                                              wasColdStart:&coldStart
+                                                     error:error];
+  if (engine == nullptr) {
+    return nil;
   }
 
-  return nil;
+  NSMutableDictionary<NSString *, id> *runtimeDiagnostics =
+      [LiteRTLMRuntimeConfigDiagnostics(runtimeConfig) mutableCopy];
+  runtimeDiagnostics[@"modelPath"] = modelPath ?: @"";
+  runtimeDiagnostics[@"backend"] = _loadedBackend ?: @"unknown";
+  runtimeDiagnostics[@"maxNumTokens"] = _loadedMaxNumTokens ?: @(0);
+
+  // Validate screenshot file exists.
+  if (screenshotPath.length == 0 ||
+      ![[NSFileManager defaultManager] isReadableFileAtPath:screenshotPath]) {
+    if (error != nil) {
+      runtimeDiagnostics[@"screenshotPath"] = screenshotPath ?: @"";
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"Screenshot file is not readable.",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  NSDictionary<NSFileAttributeKey, id> *screenshotAttributes =
+      [[NSFileManager defaultManager] attributesOfItemAtPath:screenshotPath error:nil];
+  runtimeDiagnostics[@"screenshotBytes"] = screenshotAttributes[NSFileSize] ?: @(0);
+
+  // Build session and conversation config.
+  LiteRtLmSessionConfig *sessionConfig = litert_lm_session_config_create();
+  if (sessionConfig == nullptr) {
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"session_config_create=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  LiteRtLmSamplerParams samplerParams =
+      LiteRTLMSamplerParamsFromRuntimeConfig(runtimeConfig);
+  litert_lm_session_config_set_max_output_tokens(
+      sessionConfig,
+      (int)LiteRTLMMaxOutputTokensFromRuntimeConfig(runtimeConfig));
+  litert_lm_session_config_set_sampler_params(sessionConfig, &samplerParams);
+
+  // Build multimodal conversation message with screenshot file path + prompt.
+  // LiteRT-LM's LoadItemData accepts {"type":"image","path":"..."} and
+  // memory-maps the file directly — no base64 encoding needed.
+  NSDictionary<NSString *, id> *message = @{
+    @"role": @"user",
+    @"content": @[
+      @{ @"type": @"image", @"path": screenshotPath },
+      @{ @"type": @"text", @"text": prompt },
+    ],
+  };
+
+  NSData *messageData = [NSJSONSerialization dataWithJSONObject:message options:0 error:nil];
+  if (messageData == nil) {
+    litert_lm_session_config_delete(sessionConfig);
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"Failed to serialize inference message JSON.",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+  NSString *messageJSON = [[NSString alloc] initWithData:messageData encoding:NSUTF8StringEncoding];
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: creating conversation (screenshot=%@, prompt=%luC)",
+          runtimeDiagnostics[@"screenshotBytes"], (unsigned long)prompt.length);
+  }
+
+  LiteRtLmConversationConfig *conversationConfig =
+      litert_lm_conversation_config_create(engine, sessionConfig, nullptr, nullptr, nullptr, false);
+  litert_lm_session_config_delete(sessionConfig);
+
+  if (conversationConfig == nullptr) {
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"conversation_config_create=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  LiteRtLmConversation *conversation =
+      litert_lm_conversation_create(engine, conversationConfig);
+  litert_lm_conversation_config_delete(conversationConfig);
+
+  if (conversation == nullptr) {
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"conversation_create=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: sending multimodal message");
+  }
+
+  LiteRtLmJsonResponse *jsonResponse =
+      litert_lm_conversation_send_message(conversation, messageJSON.UTF8String, nullptr);
+
+  if (jsonResponse == nullptr) {
+    litert_lm_conversation_delete(conversation);
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
+                             @"conversation_send_message=null",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  const char *responseCString = litert_lm_json_response_get_string(jsonResponse);
+  NSString *responseJSONString = responseCString != nullptr
+      ? [NSString stringWithUTF8String:responseCString] : nil;
+  id responseObject = LiteRTLMParseJSONObjectFromUTF8(responseCString);
+  NSString *extractedText = LiteRTLMExtractTextFromResponseObject(responseObject);
+
+  litert_lm_json_response_delete(jsonResponse);
+  litert_lm_conversation_delete(conversation);
+
+  NSString *rawModelText = [extractedText stringByTrimmingCharactersInSet:
+      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (rawModelText.length == 0 && responseJSONString != nil) {
+    rawModelText = [responseJSONString stringByTrimmingCharactersInSet:
+        [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  }
+
+  if (rawModelText.length == 0) {
+    if (error != nil) {
+      *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
+                             @"Model returned empty response for inference.",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: raw model output=%@", rawModelText);
+  }
+
+  // Try to parse the model text as a JSON action object.
+  // Strip markdown code fences if the model wraps its output.
+  NSString *jsonCandidate = rawModelText;
+  if ([jsonCandidate hasPrefix:@"```"]) {
+    NSRange firstNewline = [jsonCandidate rangeOfString:@"\n"];
+    NSRange lastFence = [jsonCandidate rangeOfString:@"```" options:NSBackwardsSearch];
+    if (firstNewline.location != NSNotFound && lastFence.location > firstNewline.location) {
+      jsonCandidate = [jsonCandidate substringWithRange:
+          NSMakeRange(firstNewline.location + 1,
+                      lastFence.location - firstNewline.location - 1)];
+      jsonCandidate = [jsonCandidate stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+  }
+
+  NSData *actionData = [jsonCandidate dataUsingEncoding:NSUTF8StringEncoding];
+  id actionObject = actionData != nil
+      ? [NSJSONSerialization JSONObjectWithData:actionData options:0 error:nil]
+      : nil;
+
+  if (![actionObject isKindOfClass:[NSDictionary class]]) {
+    if (error != nil) {
+      runtimeDiagnostics[@"rawModelOutput"] = rawModelText;
+      *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
+                             @"Model output is not a valid JSON action object.",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  NSDictionary<NSString *, id> *actionDict = (NSDictionary<NSString *, id> *)actionObject;
+  NSString *action = actionDict[@"action"];
+  NSDictionary<NSString *, id> *parameters = actionDict[@"parameters"];
+
+  if (![action isKindOfClass:[NSString class]] || action.length == 0) {
+    if (error != nil) {
+      runtimeDiagnostics[@"rawModelOutput"] = rawModelText;
+      *error = LiteRTLMError(LiteRTLMAdapterErrorInvalidResponse,
+                             @"Model output JSON is missing an 'action' field.",
+                             runtimeDiagnostics);
+    }
+    return nil;
+  }
+
+  if (![parameters isKindOfClass:[NSDictionary class]]) {
+    parameters = @{};
+  }
+
+  NSNumber *elapsedMs = @((CFAbsoluteTimeGetCurrent() - startedAt) * 1000.0);
+  runtimeDiagnostics[@"coldStart"] = @(coldStart);
+  runtimeDiagnostics[@"elapsedMs"] = elapsedMs;
+  runtimeDiagnostics[@"apiPath"] = @"conversation";
+
+  if (verboseNativeLogging) {
+    NSLog(@"[LiteRTLMAdapter] runInference: action=%@ elapsed=%.0fms", action, elapsedMs.doubleValue);
+  }
+
+  return @{
+    @"action": action,
+    @"parameters": parameters,
+    @"diagnostics": runtimeDiagnostics,
+  };
 }
 
 - (NSDictionary<NSString *, id> *)runTextSmokeTestWithModelPath:(NSString *)modelPath
