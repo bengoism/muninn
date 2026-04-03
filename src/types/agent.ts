@@ -45,6 +45,8 @@ export type AgentActionRecord = {
   parameters: Record<string, unknown>;
   status: 'pending' | 'succeeded' | 'failed';
   reason: string | null;
+  urlBefore: string | null;
+  urlAfter: string | null;
   timestamp: string;
 };
 

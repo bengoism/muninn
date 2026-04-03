@@ -22,6 +22,7 @@ import {
   runInference,
   runLiteRTLMSmokeTest,
 } from '../../../native/agent-runtime';
+import { GoalBar } from '../components/GoalBar';
 import { useAgentLoop } from '../loop/use-agent-loop';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
@@ -335,27 +336,53 @@ export function BrowserScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.screen}
     >
-      <SafeAreaView edges={['top']} style={styles.container}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
         <BrowserChrome
           telemetryReady={telemetryReady}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           currentUrl={currentUrl}
           isLoading={isLoading}
+          modelName={activeModel?.displayName ?? null}
           onGoBack={() => browserRef.current?.goBack()}
           onGoForward={() => browserRef.current?.goForward()}
           onLoadFixture={() => setRequestedUrl(BRIDGE_FIXTURE_URL)}
           onReload={() => browserRef.current?.reload()}
           onSubmitUrl={setRequestedUrl}
+          onToggleDiagnostics={() => setShowDiagnostics((v) => !v)}
           progress={progress}
           requestedUrl={requestedUrl}
           title={title}
         />
 
+        <View style={styles.webviewFrame}>
+          <BrowserWebView
+            onLoadStart={handleBrowserLoadStart}
+            onNavigationError={setNavigationError}
+            onNavigationStateChange={applyNavigationState}
+            onProgressChange={setProgress}
+            onTelemetryMessage={handleTelemetryMessage}
+            onTelemetryProtocolError={handleTelemetryProtocolError}
+            ref={browserRef}
+            requestedUrl={requestedUrl}
+          />
+        </View>
+
+        <GoalBar
+          onStart={(g) => agentLoop.start(g)}
+          onCancel={agentLoop.cancel}
+          isRunning={agentLoop.isRunning}
+          currentStep={stepCount}
+          modelReady={hasDownloadedModel}
+          onDownloadModel={handleDownloadModel}
+          isDownloading={isDownloadingModel}
+        />
+
+        {showDiagnostics && (
         <ScrollView
           contentContainerStyle={styles.panelContent}
           keyboardShouldPersistTaps="handled"
-          style={styles.panel}
+          style={styles.diagnosticsPanel}
         >
           <View style={styles.panelHeader}>
             <View>
@@ -644,19 +671,7 @@ export function BrowserScreen() {
             </View>
           ) : null}
         </ScrollView>
-
-        <View style={styles.webviewFrame}>
-          <BrowserWebView
-            onLoadStart={handleBrowserLoadStart}
-            onNavigationError={setNavigationError}
-            onNavigationStateChange={applyNavigationState}
-            onProgressChange={setProgress}
-            onTelemetryMessage={handleTelemetryMessage}
-            onTelemetryProtocolError={handleTelemetryProtocolError}
-            ref={browserRef}
-            requestedUrl={requestedUrl}
-          />
-        </View>
+        )}
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -1031,6 +1046,11 @@ const styles = StyleSheet.create({
     maxHeight: 292,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#17263b',
+  },
+  diagnosticsPanel: {
+    maxHeight: 300,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#17263b',
   },
   panelContent: {
     gap: 10,

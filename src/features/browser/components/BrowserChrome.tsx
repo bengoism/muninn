@@ -17,6 +17,7 @@ type BrowserChromeProps = {
   canGoForward: boolean;
   currentUrl: string;
   isLoading: boolean;
+  modelName: string | null;
   progress: number;
   requestedUrl: string;
   title: string;
@@ -25,6 +26,7 @@ type BrowserChromeProps = {
   onLoadFixture: () => void;
   onReload: () => void;
   onSubmitUrl: (url: string) => void;
+  onToggleDiagnostics: () => void;
 };
 
 export function BrowserChrome({
@@ -33,6 +35,7 @@ export function BrowserChrome({
   canGoForward,
   currentUrl,
   isLoading,
+  modelName,
   progress,
   requestedUrl,
   title,
@@ -41,6 +44,7 @@ export function BrowserChrome({
   onLoadFixture,
   onReload,
   onSubmitUrl,
+  onToggleDiagnostics,
 }: BrowserChromeProps) {
   const [draftUrl, setDraftUrl] = useState(requestedUrl);
   const [isEditing, setIsEditing] = useState(false);
@@ -90,22 +94,23 @@ export function BrowserChrome({
           </Text>
         </View>
 
-        <View
+        <Pressable
+          onPress={onToggleDiagnostics}
           style={[
             styles.bridgePill,
-            telemetryReady ? styles.bridgeReady : null,
+            modelName ? styles.bridgeReady : null,
           ]}
         >
           <View
             style={[
               styles.bridgePillDot,
-              telemetryReady ? styles.bridgePillDotReady : null,
+              modelName ? styles.bridgePillDotReady : null,
             ]}
           />
           <Text style={styles.bridgePillText}>
-            {telemetryReady ? 'Telemetry active' : 'Telemetry pending'}
+            {modelName ?? 'No model'}
           </Text>
-        </View>
+        </Pressable>
       </View>
 
       <View style={styles.addressRow}>

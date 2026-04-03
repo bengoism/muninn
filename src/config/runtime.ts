@@ -7,9 +7,9 @@ export const DEFAULT_AGENT_GOAL =
   'Open the current page and prepare the browser for the agent loop.';
 
 export const DEFAULT_AGENT_RUNTIME_MODE: RuntimeMode =
-  process.env.EXPO_PUBLIC_AGENT_RUNTIME_MODE === 'litertlm'
-    ? 'litertlm'
-    : 'replay';
+  process.env.EXPO_PUBLIC_AGENT_RUNTIME_MODE === 'replay'
+    ? 'replay'
+    : 'litertlm';
 
 export const DEFAULT_LITERT_LM_SMOKE_TEST_PROMPT =
   'Reply in one short sentence: confirm the model loaded successfully and answer what the capital of France is.';
