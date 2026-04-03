@@ -22,6 +22,7 @@ import {
   runInference,
   runLiteRTLMSmokeTest,
 } from '../../../native/agent-runtime';
+import { useAgentLoop } from '../loop/use-agent-loop';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
 import type {
@@ -99,7 +100,6 @@ export function BrowserScreen() {
   );
   const setLastAgentError = useAgentSessionStore((state) => state.setLastError);
 
-  const [isRunningSmokeTest, setIsRunningSmokeTest] = useState(false);
   const [isRunningEvaluation, setIsRunningEvaluation] = useState(false);
   const [isRunningObservation, setIsRunningObservation] = useState(false);
   const [lastEvaluationResult, setLastEvaluationResult] =
@@ -123,6 +123,9 @@ export function BrowserScreen() {
   );
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
+  const agentLoop = useAgentLoop(browserRef, runtimeMode);
+  const stepCount = useAgentSessionStore((state) => state.stepCount);
+
   const frames = useMemo(() => Object.values(framesById), [framesById]);
   const primaryModel = availableModels[0] ?? null;
   const activeModel = useMemo(
@@ -133,48 +136,6 @@ export function BrowserScreen() {
     () => availableModels.some((model) => model.downloaded),
     [availableModels]
   );
-
-  const handleNativeSmokeTest = async () => {
-    try {
-      setIsRunningSmokeTest(true);
-      setLoopState('reasoning');
-      setLastAgentError(null);
-
-      const capture =
-        lastObservationResult?.screenshot ??
-        (await browserRef.current?.captureViewport());
-
-      if (!capture) {
-        throw new Error('Browser host ref was unavailable.');
-      }
-
-      const response = await runInference({
-        goal,
-        screenshotUri: capture.uri,
-        axSnapshot: lastObservationResult?.axSnapshot ?? [],
-        actionHistory: [],
-        runtimeMode,
-      });
-
-      setLastNativeResponse(response);
-
-      if (!response.ok) {
-        setLoopState('failed');
-        setLastAgentError(response.message);
-        return;
-      }
-
-      setLoopState(mapResponseToLoopState(response));
-    } catch (error) {
-      setLoopState('failed');
-      setLastNativeResponse(null);
-      setLastAgentError(
-        error instanceof Error ? error.message : 'Native smoke test failed.'
-      );
-    } finally {
-      setIsRunningSmokeTest(false);
-    }
-  };
 
   const refreshModelDiagnostics = useCallback(async () => {
     if (modelDiagnosticsRefreshInFlightRef.current) {
@@ -494,15 +455,19 @@ export function BrowserScreen() {
               onPress={handleEvaluatePageTitle}
               tone="secondary"
             />
-            <DebugButton
-              label={
-                isRunningSmokeTest
-                  ? `Running ${formatRuntimeModeLabel(runtimeMode)}...`
-                  : `Run ${formatRuntimeModeLabel(runtimeMode)}`
-              }
-              onPress={handleNativeSmokeTest}
-              tone="quiet"
-            />
+            {agentLoop.isRunning ? (
+              <DebugButton
+                label={`Cancel (step ${stepCount})`}
+                onPress={agentLoop.cancel}
+                tone="quiet"
+              />
+            ) : (
+              <DebugButton
+                label={`Start Agent (${formatRuntimeModeLabel(runtimeMode)})`}
+                onPress={() => agentLoop.start(goal)}
+                tone="quiet"
+              />
+            )}
           </View>
 
           <View style={styles.summaryGrid}>
