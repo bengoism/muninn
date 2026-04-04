@@ -1,15 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  Dimensions,
-  FlatList,
-  PanResponder,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import BottomSheet, { BottomSheetFlatList, BottomSheetTextInput } from '@gorhom/bottom-sheet';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useChatStore, type ChatMessage } from '../../../state/chat-store';
@@ -23,10 +14,6 @@ type BottomPanelProps = {
   modelReady: boolean;
   modelName: string | null;
 };
-
-const COLLAPSED_HEIGHT = 110;
-const SCREEN_HEIGHT = Dimensions.get('window').height;
-const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.6;
 
 function formatStep(msg: ChatMessage & { type: 'agent_step' }): string {
   const icon =
@@ -92,60 +79,40 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
 }
 
 export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelName }: BottomPanelProps) {
+  const sheetRef = useRef<BottomSheet>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
-  const [expanded, setExpanded] = useState(false);
-  const heightAnim = useRef(new Animated.Value(COLLAPSED_HEIGHT)).current;
-  const listRef = useRef<FlatList>(null);
+  const snapPoints = useMemo(() => ['12%', '50%', '85%'], []);
 
   const goal = useAgentSessionStore((s) => s.goal);
   const setGoal = useAgentSessionStore((s) => s.setGoal);
   const loopState = useAgentSessionStore((s) => s.loopState);
   const messages = useChatStore((s) => s.messages);
+  const sheetIndex = useRef(0);
 
   const isTerminal =
     loopState === 'finished' ||
     loopState === 'yielded' ||
     loopState === 'failed';
 
-  const togglePanel = () => {
-    const toValue = expanded ? COLLAPSED_HEIGHT : EXPANDED_HEIGHT;
-    setExpanded(!expanded);
-    Animated.spring(heightAnim, {
-      toValue,
-      useNativeDriver: false,
-      tension: 80,
-      friction: 12,
-    }).start();
-  };
-
   useEffect(() => {
-    if (isRunning && !expanded) {
-      setExpanded(true);
-      Animated.spring(heightAnim, {
-        toValue: EXPANDED_HEIGHT,
-        useNativeDriver: false,
-        tension: 80,
-        friction: 12,
-      }).start();
+    if (isRunning) {
+      sheetRef.current?.snapToIndex(1);
     }
   }, [isRunning]);
 
-  useEffect(() => {
-    if (messages.length > 0 && expanded) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  }, [messages.length, expanded]);
-
   return (
-    <Animated.View style={[styles.container, { height: heightAnim }]}>
-      {/* Handle */}
-      <Pressable onPress={togglePanel} style={styles.handleArea}>
-        <View style={styles.handle} />
-      </Pressable>
-
+    <BottomSheet
+      ref={sheetRef}
+      snapPoints={snapPoints}
+      index={0}
+      backgroundStyle={styles.sheetBg}
+      handleIndicatorStyle={styles.handle}
+      enablePanDownToClose={false}
+      onChange={(index: number) => { sheetIndex.current = index; }}
+    >
       {/* Goal input */}
       <View style={styles.goalRow}>
-        <TextInput
+        <BottomSheetTextInput
           editable={!isRunning}
           onChangeText={setGoal}
           onSubmitEditing={() => {
@@ -188,73 +155,60 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
       </View>
 
       {/* Tabs */}
-      {expanded && (
-        <>
-          <View style={styles.tabBar}>
-            <Pressable
-              onPress={() => setActiveTab('chat')}
-              style={[styles.tab, activeTab === 'chat' && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>
-                CHAT
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setActiveTab('debug')}
-              style={[styles.tab, activeTab === 'debug' && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, activeTab === 'debug' && styles.tabTextActive]}>
-                DEBUG
-              </Text>
-            </Pressable>
-            <View style={{ flex: 1 }} />
-            {modelName && (
-              <Text style={styles.modelLabel}>{modelName}</Text>
-            )}
-          </View>
+      <View style={styles.tabBar}>
+        <Pressable
+          onPress={() => setActiveTab('chat')}
+          style={[styles.tab, activeTab === 'chat' && styles.tabActive]}
+        >
+          <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>
+            CHAT
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setActiveTab('debug')}
+          style={[styles.tab, activeTab === 'debug' && styles.tabActive]}
+        >
+          <Text style={[styles.tabText, activeTab === 'debug' && styles.tabTextActive]}>
+            DEBUG
+          </Text>
+        </Pressable>
+        <View style={{ flex: 1 }} />
+        {modelName && (
+          <Text style={styles.modelLabel}>{modelName}</Text>
+        )}
+      </View>
 
-          {activeTab === 'chat' ? (
-            messages.length > 0 ? (
-              <FlatList
-                ref={listRef}
-                data={messages}
-                keyExtractor={(_, i) => String(i)}
-                renderItem={({ item }) => <ChatMessageRow message={item} />}
-                style={styles.list}
-                contentContainerStyle={styles.listContent}
-              />
-            ) : (
-              <View style={styles.emptyContent}>
-                <Text style={styles.emptyText}>Agent activity will appear here</Text>
-              </View>
-            )
-          ) : (
-            <View style={styles.emptyContent}>
-              <Text style={styles.emptyText}>Debug telemetry coming soon</Text>
-            </View>
-          )}
-        </>
+      {/* Content */}
+      {activeTab === 'chat' ? (
+        messages.length > 0 ? (
+          <BottomSheetFlatList
+            data={messages}
+            keyExtractor={(_: ChatMessage, i: number) => String(i)}
+            renderItem={({ item }: { item: ChatMessage }) => <ChatMessageRow message={item} />}
+            contentContainerStyle={styles.listContent}
+          />
+        ) : (
+          <View style={styles.emptyContent}>
+            <Text style={styles.emptyText}>Agent activity will appear here</Text>
+          </View>
+        )
+      ) : (
+        <View style={styles.emptyContent}>
+          <Text style={styles.emptyText}>Debug telemetry coming soon</Text>
+        </View>
       )}
-    </Animated.View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  sheetBg: {
     backgroundColor: '#222',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#333',
-    overflow: 'hidden',
-  },
-  handleArea: {
-    alignItems: 'center',
-    paddingVertical: 8,
   },
   handle: {
+    backgroundColor: '#444',
     width: 32,
     height: 3,
-    borderRadius: 1.5,
-    backgroundColor: '#444',
   },
   goalRow: {
     flexDirection: 'row',
@@ -348,9 +302,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     alignSelf: 'center',
     paddingRight: 4,
-  },
-  list: {
-    flex: 1,
   },
   listContent: {
     paddingHorizontal: 16,
