@@ -150,16 +150,20 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
     }).start();
   };
 
+  const dragStart = useRef(SNAP_COLLAPSED);
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
+      onPanResponderGrant: () => {
+        dragStart.current = currentHeight.current;
+      },
       onPanResponderMove: (_, g) => {
-        const newH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, currentHeight.current - g.dy));
+        const newH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, dragStart.current - g.dy));
         heightAnim.setValue(newH);
       },
       onPanResponderRelease: (_, g) => {
-        const projected = currentHeight.current - g.dy;
+        const projected = dragStart.current - g.dy - g.vy * 150;
         const target = snapTo(projected);
         animateTo(target);
         if (target === SNAP_COLLAPSED) Keyboard.dismiss();
