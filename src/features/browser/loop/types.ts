@@ -9,8 +9,8 @@ export type LoopConfig = {
 };
 
 export const DEFAULT_LOOP_CONFIG: LoopConfig = {
-  maxSteps: 15,
-  maxDurationMs: 120_000,
+  maxSteps: 30,
+  maxDurationMs: 0,
   maxConsecutiveNoOps: 3,
   postActionSettleMs: 800,
 };

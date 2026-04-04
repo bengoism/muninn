@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Keyboard } from 'react-native';
 
 import { runInference } from '../../../native/agent-runtime';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
@@ -96,6 +96,7 @@ export function useAgentLoop(
 
       resetSession();
       setGoal(goal);
+      Keyboard.dismiss();
       console.log('[muninn:start]', JSON.stringify({ goal, runtimeMode }));
 
       const loopStartedAt = Date.now();
@@ -112,7 +113,7 @@ export function useAgentLoop(
       try {
         while (
           store.getState().stepCount < mergedConfigRef.current.maxSteps &&
-          Date.now() - loopStartedAt < mergedConfigRef.current.maxDurationMs &&
+          (mergedConfigRef.current.maxDurationMs <= 0 || Date.now() - loopStartedAt < mergedConfigRef.current.maxDurationMs) &&
           !cancelledRef.current
         ) {
           // ---------------------------------------------------------------
@@ -343,6 +344,7 @@ export function useAgentLoop(
               `Step budget exhausted (${mergedConfigRef.current.maxSteps}).`,
             );
           } else if (
+            mergedConfigRef.current.maxDurationMs > 0 &&
             Date.now() - loopStartedAt >=
             mergedConfigRef.current.maxDurationMs
           ) {
