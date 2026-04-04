@@ -369,14 +369,12 @@ export function BrowserScreen() {
           />
         </View>
 
-        <GoalBar
+        <BottomPanel
           onStart={(g) => agentLoop.start(g)}
           onCancel={agentLoop.cancel}
           isRunning={agentLoop.isRunning}
           modelReady={hasDownloadedModel}
         />
-
-        <BottomPanel />
 
         {showDiagnostics && (
         <ScrollView
