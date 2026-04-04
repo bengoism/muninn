@@ -356,7 +356,7 @@ export function BrowserScreen() {
           title={title}
         />
 
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, position: 'relative' }}>
           <View style={styles.webviewFrame}>
             <BrowserWebView
               onLoadStart={handleBrowserLoadStart}

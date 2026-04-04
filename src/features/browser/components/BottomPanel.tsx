@@ -120,7 +120,7 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
 export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelName }: BottomPanelProps) {
   const sheetRef = useRef<BottomSheet>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
-  const snapPoints = useMemo(() => ['12%', '50%', '85%'], []);
+  const snapPoints = useMemo(() => [120, '50%', '85%'], []);
 
   const goal = useAgentSessionStore((s) => s.goal);
   const setGoal = useAgentSessionStore((s) => s.setGoal);
