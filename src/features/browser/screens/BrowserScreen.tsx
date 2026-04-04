@@ -124,7 +124,6 @@ export function BrowserScreen() {
     DEFAULT_AGENT_RUNTIME_MODE
   );
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [panelExpanded, setPanelExpanded] = useState(false);
 
   const agentLoop = useAgentLoop(browserRef, runtimeMode);
   const stepCount = useAgentSessionStore((state) => state.stepCount);
@@ -357,7 +356,7 @@ export function BrowserScreen() {
           title={title}
         />
 
-        <View style={[styles.webviewFrame, panelExpanded && styles.webviewFrameCompressed]}>
+        <View style={styles.webviewFrame}>
           <BrowserWebView
             onLoadStart={handleBrowserLoadStart}
             onNavigationError={setNavigationError}
@@ -370,17 +369,14 @@ export function BrowserScreen() {
           />
         </View>
 
-        <BottomPanel
-          expanded={panelExpanded}
-          onToggle={() => setPanelExpanded((v) => !v)}
-        />
-
         <GoalBar
           onStart={(g) => agentLoop.start(g)}
           onCancel={agentLoop.cancel}
           isRunning={agentLoop.isRunning}
           modelReady={hasDownloadedModel}
         />
+
+        <BottomPanel />
 
         {showDiagnostics && (
         <ScrollView
@@ -1306,9 +1302,5 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#17263b',
     backgroundColor: '#ffffff',
-  },
-  webviewFrameCompressed: {
-    flex: 0.35,
-    marginBottom: 0,
   },
 });

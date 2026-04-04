@@ -1,83 +1,76 @@
-import { useState } from 'react';
+import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ChatPanel } from './ChatPanel';
 
 type Tab = 'chat' | 'debug';
 
-type BottomPanelProps = {
-  expanded: boolean;
-  onToggle: () => void;
-};
-
-export function BottomPanel({ expanded, onToggle }: BottomPanelProps) {
+export function BottomPanel() {
+  const sheetRef = useRef<BottomSheet>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
+  const snapPoints = useMemo(() => [56, '50%', '85%'], []);
+
+  const handleTabPress = useCallback(
+    (tab: Tab) => {
+      setActiveTab(tab);
+      sheetRef.current?.snapToIndex(1);
+    },
+    [],
+  );
 
   return (
-    <View style={[styles.container, expanded && styles.containerExpanded]}>
+    <BottomSheet
+      ref={sheetRef}
+      snapPoints={snapPoints}
+      index={0}
+      backgroundStyle={styles.background}
+      handleIndicatorStyle={styles.handleIndicator}
+      enablePanDownToClose={false}
+    >
       <View style={styles.tabBar}>
-        <Pressable style={styles.handle} onPress={onToggle}>
-          <View style={styles.handleIndicator} />
+        <Pressable
+          onPress={() => handleTabPress('chat')}
+          style={[styles.tab, activeTab === 'chat' && styles.tabActive]}
+        >
+          <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>
+            Chat
+          </Text>
         </Pressable>
-        <View style={styles.tabs}>
-          <Pressable
-            onPress={() => { setActiveTab('chat'); if (!expanded) onToggle(); }}
-            style={[styles.tab, activeTab === 'chat' && styles.tabActive]}
-          >
-            <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>
-              Chat
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => { setActiveTab('debug'); if (!expanded) onToggle(); }}
-            style={[styles.tab, activeTab === 'debug' && styles.tabActive]}
-          >
-            <Text style={[styles.tabText, activeTab === 'debug' && styles.tabTextActive]}>
-              Debug
-            </Text>
-          </Pressable>
-        </View>
+        <Pressable
+          onPress={() => handleTabPress('debug')}
+          style={[styles.tab, activeTab === 'debug' && styles.tabActive]}
+        >
+          <Text style={[styles.tabText, activeTab === 'debug' && styles.tabTextActive]}>
+            Debug
+          </Text>
+        </Pressable>
       </View>
 
-      {expanded && (
-        <View style={styles.content}>
-          {activeTab === 'chat' ? (
-            <ChatPanel />
-          ) : (
-            <View style={styles.debugPlaceholder}>
-              <Text style={styles.debugText}>Debug telemetry coming soon</Text>
-            </View>
-          )}
-        </View>
-      )}
-    </View>
+      <BottomSheetView style={styles.content}>
+        {activeTab === 'chat' ? (
+          <ChatPanel />
+        ) : (
+          <View style={styles.debugPlaceholder}>
+            <Text style={styles.debugText}>Debug telemetry coming soon</Text>
+          </View>
+        )}
+      </BottomSheetView>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  background: {
     backgroundColor: '#0d1728',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#1f344d',
-  },
-  containerExpanded: {
-    flex: 1,
-    maxHeight: '65%',
-  },
-  tabBar: {
-    alignItems: 'center',
-  },
-  handle: {
-    paddingVertical: 6,
-    paddingHorizontal: 40,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
   },
   handleIndicator: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
     backgroundColor: '#2a3f5c',
+    width: 36,
   },
-  tabs: {
+  tabBar: {
     flexDirection: 'row',
     gap: 2,
     paddingHorizontal: 12,
