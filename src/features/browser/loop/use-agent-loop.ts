@@ -208,6 +208,25 @@ export function useAgentLoop(
           // ---------------------------------------------------------------
           setLoopState('acting');
           const preSnapshot = await captureValidationSnapshot(browser);
+
+          // Early stale-ref detection: if the target element is already gone
+          // before we even try, skip directly to re-observe.
+          const targetId = typeof parameters.id === 'string' ? parameters.id : null;
+          if (targetId && !preSnapshot.axNodeIds.has(targetId)) {
+            logStep(stepNum, 'skip', { reason: 'stale_ref_before_act', id: targetId });
+            chat.addMessage({
+              type: 'agent_step',
+              step: stepNum,
+              action,
+              params: parameters,
+              outcome: 'stale_ref',
+              reason: 'Element gone, re-observing',
+              urlChanged: false,
+              timestamp: new Date().toISOString(),
+            });
+            continue;
+          }
+
           const toolResult = await executeTool(action, parameters, browser);
           if (cancelledRef.current) break;
 
