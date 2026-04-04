@@ -88,6 +88,28 @@ export const ACTIONS_INJECTION_SCRIPT = `
       else if (direction === 'left') dx = -px;
       window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
       return { ok: true, reason: null };
+    },
+
+    /** Lightweight post-action snapshot for validation (issue #7). */
+    captureValidationState: function() {
+      var ids = [];
+      var bounds = {};
+      var els = document.querySelectorAll('[data-ai-internal-id]');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        var id = el.getAttribute('data-ai-internal-id');
+        if (!id) continue;
+        ids.push(id);
+        var rect = el.getBoundingClientRect();
+        bounds[id] = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+      }
+      var focused = document.activeElement;
+      return {
+        scrollY: window.scrollY,
+        axNodeIds: ids,
+        axNodeBounds: bounds,
+        focusedElementId: focused ? focused.getAttribute('data-ai-internal-id') : null
+      };
     }
   };
 })();

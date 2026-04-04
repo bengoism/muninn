@@ -40,14 +40,27 @@ export type AxNode = {
   redactionReason: string | null;
 };
 
+export type AgentActionStatus =
+  | 'pending'
+  | 'succeeded'
+  | 'failed'
+  | 'no_op'
+  | 'partial_success'
+  | 'blocked'
+  | 'stale_ref';
+
 export type AgentActionRecord = {
   action: ToolName;
   parameters: Record<string, unknown>;
-  status: 'pending' | 'succeeded' | 'failed';
+  status: AgentActionStatus;
   reason: string | null;
   urlBefore: string | null;
   urlAfter: string | null;
   timestamp: string;
+  /** Timestamp of the original action this retried (if a fallback). */
+  retryOf?: string;
+  /** Escalation path taken for this action. */
+  fallbackChain?: ToolName[];
 };
 
 export type InferenceRequest = {
@@ -169,6 +182,19 @@ export type LoopState =
   | 'reasoning'
   | 'acting'
   | 'validating'
+  | 'retrying'
   | 'yielded'
   | 'finished'
   | 'failed';
+
+export type StopReason =
+  | 'goal_complete'
+  | 'yielded_to_user'
+  | 'step_budget_exhausted'
+  | 'time_budget_exhausted'
+  | 'consecutive_no_ops'
+  | 'repeated_identical_failure'
+  | 'unrecoverable_error'
+  | 'modal_blocked'
+  | 'user_cancelled'
+  | 'app_backgrounded';

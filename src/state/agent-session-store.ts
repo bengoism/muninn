@@ -5,15 +5,17 @@ import type {
   AgentActionRecord,
   InferenceResponse,
   LoopState,
+  StopReason,
 } from '../types/agent';
 
-const MAX_ACTION_HISTORY = 3;
+const MAX_ACTION_HISTORY = 5;
 
 type AgentSessionState = {
   goal: string;
   loopState: LoopState;
   lastNativeResponse: InferenceResponse | null;
   lastError: string | null;
+  stopReason: StopReason | null;
   actionHistory: AgentActionRecord[];
   stepCount: number;
   sessionId: string | null;
@@ -22,6 +24,7 @@ type AgentSessionState = {
   setLoopState: (loopState: LoopState) => void;
   setLastNativeResponse: (response: InferenceResponse | null) => void;
   setLastError: (error: string | null) => void;
+  setStopReason: (reason: StopReason | null) => void;
   addActionRecord: (record: AgentActionRecord) => void;
   incrementStep: () => void;
   resetSession: () => void;
@@ -32,6 +35,7 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
   loopState: 'idle',
   lastNativeResponse: null,
   lastError: null,
+  stopReason: null,
   actionHistory: [],
   stepCount: 0,
   sessionId: null,
@@ -40,6 +44,7 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
   setLoopState: (loopState) => set({ loopState }),
   setLastNativeResponse: (lastNativeResponse) => set({ lastNativeResponse }),
   setLastError: (lastError) => set({ lastError }),
+  setStopReason: (stopReason) => set({ stopReason }),
 
   addActionRecord: (record) =>
     set((state) => ({
@@ -54,6 +59,7 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
       loopState: 'idle',
       lastNativeResponse: null,
       lastError: null,
+      stopReason: null,
       actionHistory: [],
       stepCount: 0,
       sessionId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
