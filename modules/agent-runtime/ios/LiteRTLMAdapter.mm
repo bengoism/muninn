@@ -782,6 +782,54 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
           parameters = ((NSDictionary *)textObject)[@"parameters"];
         }
       }
+
+      // Fallback: parse <|tool_call>call:name{key:value,...} format that Gemma
+      // sometimes emits in text content instead of a proper tool_calls array.
+      if (action == nil && textCandidate.length > 0) {
+        NSRange callRange = [textCandidate rangeOfString:@"call:"];
+        if (callRange.location != NSNotFound) {
+          NSString *afterCall = [textCandidate substringFromIndex:
+              callRange.location + callRange.length];
+          // Extract function name (everything before first '{' or end of string).
+          NSRange braceRange = [afterCall rangeOfString:@"{"];
+          if (braceRange.location != NSNotFound) {
+            action = [[afterCall substringToIndex:braceRange.location]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            // Extract arguments between first '{' and matching '}'.
+            NSString *argsRaw = [afterCall substringFromIndex:braceRange.location];
+            // Try to find key:value pairs and build a dictionary.
+            // Format: {key1:value1,key2:value2} or {key1:<|"|>value<|"|>}
+            NSMutableDictionary *parsedParams = [NSMutableDictionary dictionary];
+            NSString *inner = argsRaw;
+            if ([inner hasPrefix:@"{"]) {
+              NSRange closeRange = [inner rangeOfString:@"}" options:NSBackwardsSearch];
+              if (closeRange.location != NSNotFound) {
+                inner = [inner substringWithRange:NSMakeRange(1, closeRange.location - 1)];
+              } else {
+                inner = [inner substringFromIndex:1];
+              }
+            }
+            // Clean Gemma quote markers.
+            inner = [inner stringByReplacingOccurrencesOfString:@"<|\"|>" withString:@""];
+            inner = [inner stringByReplacingOccurrencesOfString:@"<|\"|>" withString:@""];
+            // Split by comma, then by first colon.
+            NSArray<NSString *> *pairs = [inner componentsSeparatedByString:@","];
+            for (NSString *pair in pairs) {
+              NSRange colonRange = [pair rangeOfString:@":"];
+              if (colonRange.location != NSNotFound && colonRange.location > 0) {
+                NSString *key = [[pair substringToIndex:colonRange.location]
+                    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                NSString *val = [[pair substringFromIndex:colonRange.location + 1]
+                    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (key.length > 0) {
+                  parsedParams[key] = val;
+                }
+              }
+            }
+            parameters = parsedParams;
+          }
+        }
+      }
     }
   }
 

@@ -282,8 +282,8 @@ struct AgentRuntimeAllowlistedModel {
     approximateSizeBytes: 2_583_085_056,
     liteRTLMRuntimeConfig: AgentRuntimeLiteRTLMRuntimeConfig(
       preferredBackends: ["cpu", "gpu"],
-      maxNumTokens: 4096,
-      maxOutputTokens: 192,
+      maxNumTokens: 6144,
+      maxOutputTokens: 1024,
       sampler: AgentRuntimeLiteRTLMSamplerConfig(
         type: .topP,
         topK: 1,
