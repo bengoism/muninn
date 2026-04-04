@@ -368,6 +368,7 @@ export function BrowserScreen() {
               ref={browserRef}
               requestedUrl={requestedUrl}
             />
+            {agentLoop.isRunning && <AgentOverlay loopState={loopState} />}
           </View>
 
           <BottomPanel
@@ -986,6 +987,27 @@ function formatLiteRTLMSmokeTestResult(
   ].join('\n');
 }
 
+function AgentOverlay({ loopState }: { loopState: string }) {
+  const label =
+    loopState === 'observing' ? 'Looking at page' :
+    loopState === 'reasoning' ? 'Thinking' :
+    loopState === 'acting' ? 'Acting' :
+    loopState === 'validating' ? 'Checking' :
+    loopState === 'retrying' ? 'Retrying' :
+    null;
+
+  if (!label) return null;
+
+  return (
+    <View style={styles.agentOverlay}>
+      <View style={styles.agentOverlayPill}>
+        <View style={styles.agentOverlayDot} />
+        <Text style={styles.agentOverlayText}>{label}</Text>
+      </View>
+    </View>
+  );
+}
+
 function buildModelStatusError(
   message: string,
   current: ModelStatus | null
@@ -1297,5 +1319,33 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
     backgroundColor: '#fff',
+  },
+  agentOverlay: {
+    position: 'absolute',
+    top: 12,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    pointerEvents: 'none',
+  },
+  agentOverlayPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  agentOverlayDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#00d47e',
+  },
+  agentOverlayText: {
+    color: '#ededed',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
