@@ -103,7 +103,7 @@ export function BrowserChrome({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#000',
+    backgroundColor: '#0a0a0a',
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   urlInput: {
-    backgroundColor: '#111',
+    backgroundColor: '#161616',
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#222',

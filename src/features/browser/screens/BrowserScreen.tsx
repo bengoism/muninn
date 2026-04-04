@@ -1034,7 +1034,7 @@ function mapResponseToLoopState(response: InferenceResponse) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#0a0a0a',
   },
   container: {
     flex: 1,
