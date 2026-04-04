@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -30,149 +31,138 @@ type BrowserChromeProps = {
 };
 
 export function BrowserChrome({
-  telemetryReady,
   canGoBack,
-  canGoForward,
   currentUrl,
   isLoading,
   modelName,
   progress,
   requestedUrl,
-  title,
   onGoBack,
   onGoForward,
   onLoadFixture,
   onReload,
   onSubmitUrl,
   onToggleDiagnostics,
+  canGoForward,
 }: BrowserChromeProps) {
-  const [draftUrl, setDraftUrl] = useState(requestedUrl);
-  const [isEditing, setIsEditing] = useState(false);
+  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [draftUrl, setDraftUrl] = useState(currentUrl || requestedUrl);
 
   useEffect(() => {
-    if (isEditing) {
-      return;
+    if (!showUrlModal) {
+      setDraftUrl(currentUrl || requestedUrl);
     }
+  }, [currentUrl, requestedUrl, showUrlModal]);
 
-    setDraftUrl(requestedUrl !== currentUrl ? requestedUrl : currentUrl || requestedUrl);
-  }, [currentUrl, isEditing, requestedUrl]);
-
-  const handleSubmit = () => {
-    setIsEditing(false);
-    onSubmitUrl(normalizeBrowserUrl(draftUrl));
-  };
+  const displayUrl = currentUrl || requestedUrl;
+  const displayHost = (() => {
+    try {
+      return new URL(displayUrl).hostname.replace(/^www\./, '');
+    } catch {
+      return displayUrl;
+    }
+  })();
 
   const progressWidth = `${Math.max(progress, isLoading ? 0.08 : 0) * 100}%` as const;
-  const subtitle =
-    requestedUrl === BRIDGE_FIXTURE_URL
-      ? 'Local bridge fixture'
-      : requestedUrl !== currentUrl
-        ? requestedUrl
-        : currentUrl;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.progressTrack}>
-        <View
-          style={[
-            styles.progressBar,
-            {
-              width: progressWidth,
-              opacity: isLoading || progress < 1 ? 1 : 0,
-            },
-          ]}
-        />
-      </View>
+    <>
+      <View style={styles.container}>
+        <View style={styles.row}>
+          <Pressable
+            disabled={!canGoBack}
+            onPress={onGoBack}
+            style={[styles.backButton, !canGoBack && styles.backButtonDisabled]}
+          >
+            <Text style={styles.backText}>{'\u2039'}</Text>
+          </Pressable>
 
-      <View style={styles.metaRow}>
-        <View style={styles.titleBlock}>
-          <Text numberOfLines={2} style={styles.title}>
-            {title || 'Untitled page'}
-          </Text>
-          <Text numberOfLines={1} style={styles.subtitle}>
-            {subtitle}
-          </Text>
+          <Pressable
+            onPress={() => setShowUrlModal(true)}
+            style={styles.urlPill}
+          >
+            {isLoading && (
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressBar, { width: progressWidth }]} />
+              </View>
+            )}
+            <Text numberOfLines={1} style={styles.urlText}>
+              {displayHost}
+            </Text>
+          </Pressable>
+
+          <Pressable onPress={onToggleDiagnostics} style={styles.modelDot}>
+            <View
+              style={[
+                styles.dot,
+                modelName ? styles.dotReady : null,
+              ]}
+            />
+          </Pressable>
         </View>
+      </View>
 
+      <Modal
+        visible={showUrlModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowUrlModal(false)}
+      >
         <Pressable
-          onPress={onToggleDiagnostics}
-          style={[
-            styles.bridgePill,
-            modelName ? styles.bridgeReady : null,
-          ]}
+          style={styles.modalOverlay}
+          onPress={() => setShowUrlModal(false)}
         >
-          <View
-            style={[
-              styles.bridgePillDot,
-              modelName ? styles.bridgePillDotReady : null,
-            ]}
-          />
-          <Text style={styles.bridgePillText}>
-            {modelName ?? 'No model'}
-          </Text>
+          <View style={styles.modalContent}>
+            <View style={styles.modalUrlRow}>
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                onChangeText={setDraftUrl}
+                onSubmitEditing={() => {
+                  setShowUrlModal(false);
+                  onSubmitUrl(normalizeBrowserUrl(draftUrl));
+                }}
+                placeholder="Enter URL"
+                placeholderTextColor="#64748b"
+                returnKeyType="go"
+                selectTextOnFocus
+                style={styles.modalUrlInput}
+                value={draftUrl}
+              />
+            </View>
+            <View style={styles.modalControls}>
+              <Pressable
+                disabled={!canGoBack}
+                onPress={() => { setShowUrlModal(false); onGoBack(); }}
+                style={[styles.modalButton, !canGoBack && styles.modalButtonDisabled]}
+              >
+                <Text style={styles.modalButtonText}>Back</Text>
+              </Pressable>
+              <Pressable
+                disabled={!canGoForward}
+                onPress={() => { setShowUrlModal(false); onGoForward(); }}
+                style={[styles.modalButton, !canGoForward && styles.modalButtonDisabled]}
+              >
+                <Text style={styles.modalButtonText}>Forward</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { setShowUrlModal(false); onReload(); }}
+                style={styles.modalButton}
+              >
+                <Text style={styles.modalButtonText}>Reload</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { setShowUrlModal(false); onLoadFixture(); }}
+                style={styles.modalButton}
+              >
+                <Text style={styles.modalButtonText}>Fixture</Text>
+              </Pressable>
+            </View>
+          </View>
         </Pressable>
-      </View>
-
-      <View style={styles.addressRow}>
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          onBlur={() => setIsEditing(false)}
-          onChangeText={setDraftUrl}
-          onFocus={() => setIsEditing(true)}
-          onSubmitEditing={handleSubmit}
-          placeholder="Enter a URL"
-          placeholderTextColor="#64748b"
-          returnKeyType="go"
-          style={styles.addressInput}
-          value={draftUrl}
-        />
-        <Pressable onPress={handleSubmit} style={styles.submitButton}>
-          <Text style={styles.submitButtonText}>Go</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.controlRow}>
-        <BrowserChromeButton
-          disabled={!canGoBack}
-          label="Back"
-          onPress={onGoBack}
-        />
-        <BrowserChromeButton
-          disabled={!canGoForward}
-          label="Forward"
-          onPress={onGoForward}
-        />
-        <BrowserChromeButton label="Reload" onPress={onReload} />
-        <BrowserChromeButton label="Fixture" onPress={onLoadFixture} />
-      </View>
-    </View>
-  );
-}
-
-type BrowserChromeButtonProps = {
-  disabled?: boolean;
-  label: string;
-  onPress: () => void;
-};
-
-function BrowserChromeButton({
-  disabled = false,
-  label,
-  onPress,
-}: BrowserChromeButtonProps) {
-  return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.controlButton,
-        disabled ? styles.controlButtonDisabled : null,
-        pressed && !disabled ? styles.controlButtonPressed : null,
-      ]}
-    >
-      <Text style={styles.controlButtonText}>{label}</Text>
-    </Pressable>
+      </Modal>
+    </>
   );
 }
 
@@ -181,132 +171,117 @@ const styles = StyleSheet.create({
     backgroundColor: '#0d1728',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#17263b',
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 14,
-    gap: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
-  progressTrack: {
-    backgroundColor: '#10203a',
-    borderRadius: 999,
-    height: 4,
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  backButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backButtonDisabled: {
+    opacity: 0.3,
+  },
+  backText: {
+    color: '#f8fafc',
+    fontSize: 24,
+    fontWeight: '300',
+    marginTop: -2,
+  },
+  urlPill: {
+    flex: 1,
+    backgroundColor: '#101927',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     overflow: 'hidden',
   },
-  metaRow: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between',
-  },
-  titleBlock: {
-    flex: 1,
-    gap: 6,
-  },
-  title: {
-    color: '#f8fafc',
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    lineHeight: 24,
-  },
-  subtitle: {
+  urlText: {
     color: '#8ca0bd',
-    fontFamily: Platform.select({
-      ios: 'Menlo',
-      android: 'monospace',
-      default: 'monospace',
-    }),
-    fontSize: 11.5,
-  },
-  bridgePill: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: '#10213a',
-    borderColor: '#1e3653',
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    minHeight: 34,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  bridgePillDot: {
-    backgroundColor: '#64748b',
-    borderRadius: 999,
-    height: 8,
-    width: 8,
-  },
-  bridgeReady: {
-    backgroundColor: '#0d3050',
-    borderColor: '#1f5f8b',
-  },
-  bridgePillDotReady: {
-    backgroundColor: '#38bdf8',
-  },
-  bridgePillText: {
-    color: '#dbeafe',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  addressRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-  },
-  addressInput: {
-    backgroundColor: '#0f1b2e',
-    borderColor: '#1e3653',
-    borderRadius: 16,
-    borderWidth: 1,
-    color: '#f8fafc',
-    flex: 1,
-    fontSize: 15,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  submitButton: {
-    alignItems: 'center',
-    backgroundColor: '#38bdf8',
-    borderRadius: 16,
-    justifyContent: 'center',
-    minWidth: 64,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  submitButtonText: {
-    color: '#082f49',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  controlRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  controlButton: {
-    alignItems: 'center',
-    backgroundColor: '#162235',
-    borderColor: '#22354f',
-    borderRadius: 14,
-    borderWidth: 1,
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  controlButtonPressed: {
-    opacity: 0.88,
-  },
-  controlButtonDisabled: {
-    opacity: 0.4,
-  },
-  controlButtonText: {
-    color: '#e2e8f0',
     fontSize: 13,
-    fontWeight: '700',
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+    textAlign: 'center',
+  },
+  progressTrack: {
+    position: 'absolute',
+    left: 0,
+    bottom: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: '#10203a',
   },
   progressBar: {
-    backgroundColor: '#38bdf8',
-    borderRadius: 999,
     height: '100%',
+    backgroundColor: '#38bdf8',
+    borderRadius: 1,
+  },
+  modelDot: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#64748b',
+  },
+  dotReady: {
+    backgroundColor: '#38bdf8',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-start',
+    paddingTop: 60,
+    paddingHorizontal: 16,
+  },
+  modalContent: {
+    backgroundColor: '#0d1728',
+    borderRadius: 20,
+    padding: 16,
+    gap: 12,
+  },
+  modalUrlRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalUrlInput: {
+    flex: 1,
+    backgroundColor: '#101927',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#1f344d',
+    color: '#f8fafc',
+    fontSize: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  modalControls: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modalButton: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#162235',
+    borderRadius: 12,
+    paddingVertical: 10,
+  },
+  modalButtonDisabled: {
+    opacity: 0.4,
+  },
+  modalButtonText: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

@@ -4,6 +4,7 @@ import { AppState, Keyboard } from 'react-native';
 import { runInference } from '../../../native/agent-runtime';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
+import { useChatStore } from '../../../state/chat-store';
 import type {
   AgentActionRecord,
   AgentActionStatus,
@@ -94,10 +95,14 @@ export function useAgentLoop(
         incrementStep,
       } = store.getState();
 
+      const chat = useChatStore.getState();
+
       resetSession();
       setGoal(goal);
       Keyboard.dismiss();
       console.log('[muninn:start]', JSON.stringify({ goal, runtimeMode }));
+      chat.addMessage({ type: 'user', text: goal, timestamp: new Date().toISOString() });
+      chat.addMessage({ type: 'agent_status', status: 'started', message: 'Working on it...', timestamp: new Date().toISOString() });
 
       const loopStartedAt = Date.now();
       let consecutiveNoOps = 0;
@@ -105,6 +110,7 @@ export function useAgentLoop(
 
       function stopLoop(reason: StopReason, message: string) {
         console.log('[muninn:stop]', JSON.stringify({ reason, message }));
+        chat.addMessage({ type: 'agent_status', status: 'stopped', message, timestamp: new Date().toISOString() });
         setStopReason(reason);
         setLastError(message);
         setLoopState('failed');
@@ -186,6 +192,12 @@ export function useAgentLoop(
             );
             const terminalReason: StopReason =
               action === 'finish' ? 'goal_complete' : 'yielded_to_user';
+            chat.addMessage({
+              type: 'agent_status',
+              status: 'finished',
+              message: (parameters.message as string) ?? (action === 'finish' ? 'Done' : 'Needs your input'),
+              timestamp: new Date().toISOString(),
+            });
             setStopReason(terminalReason);
             setLoopState(action === 'finish' ? 'finished' : 'yielded');
             break;
@@ -217,6 +229,17 @@ export function useAgentLoop(
             outcome: validation.outcome,
             reason: validation.reason,
             signals: validation.signals,
+          });
+
+          chat.addMessage({
+            type: 'agent_step',
+            step: stepNum,
+            action,
+            params: parameters,
+            outcome: validation.outcome,
+            reason: validation.reason,
+            urlChanged: validation.signals.urlChanged,
+            timestamp: new Date().toISOString(),
           });
 
           // Record primary action.

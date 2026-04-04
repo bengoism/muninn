@@ -22,6 +22,7 @@ import {
   runInference,
   runLiteRTLMSmokeTest,
 } from '../../../native/agent-runtime';
+import { BottomPanel } from '../components/BottomPanel';
 import { GoalBar } from '../components/GoalBar';
 import { useAgentLoop } from '../loop/use-agent-loop';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
@@ -123,6 +124,7 @@ export function BrowserScreen() {
     DEFAULT_AGENT_RUNTIME_MODE
   );
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [panelExpanded, setPanelExpanded] = useState(false);
 
   const agentLoop = useAgentLoop(browserRef, runtimeMode);
   const stepCount = useAgentSessionStore((state) => state.stepCount);
@@ -355,7 +357,7 @@ export function BrowserScreen() {
           title={title}
         />
 
-        <View style={styles.webviewFrame}>
+        <View style={[styles.webviewFrame, panelExpanded && styles.webviewFrameCompressed]}>
           <BrowserWebView
             onLoadStart={handleBrowserLoadStart}
             onNavigationError={setNavigationError}
@@ -368,14 +370,16 @@ export function BrowserScreen() {
           />
         </View>
 
+        <BottomPanel
+          expanded={panelExpanded}
+          onToggle={() => setPanelExpanded((v) => !v)}
+        />
+
         <GoalBar
           onStart={(g) => agentLoop.start(g)}
           onCancel={agentLoop.cancel}
           isRunning={agentLoop.isRunning}
-          currentStep={stepCount}
           modelReady={hasDownloadedModel}
-          onDownloadModel={handleDownloadModel}
-          isDownloading={isDownloadingModel}
         />
 
         {showDiagnostics && (
@@ -1294,13 +1298,17 @@ const styles = StyleSheet.create({
   },
   webviewFrame: {
     flex: 1,
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 16,
+    marginHorizontal: 4,
+    marginTop: 4,
+    marginBottom: 0,
     overflow: 'hidden',
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#17263b',
     backgroundColor: '#ffffff',
+  },
+  webviewFrameCompressed: {
+    flex: 0.35,
+    marginBottom: 0,
   },
 });
