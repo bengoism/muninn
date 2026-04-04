@@ -15,29 +15,46 @@ type BottomPanelProps = {
   modelName: string | null;
 };
 
-function formatStep(msg: ChatMessage & { type: 'agent_step' }): string {
-  const icon =
-    msg.outcome === 'success' ? '\u2713' :
-    msg.outcome === 'no_op' ? '\u2013' :
-    msg.outcome === 'blocked' ? '\u2717' :
-    msg.outcome === 'stale_ref' ? '\u26A0' :
-    '\u2717';
+function humanizeAction(action: string, params: Record<string, unknown>): string {
+  const id = params.id as string | undefined;
+  const text = params.text as string | undefined;
+  const value = params.value as string | undefined;
 
-  const action = msg.action;
-  const paramStr = Object.entries(msg.params)
-    .map(([k, v]) => `${k}=${typeof v === 'string' ? `"${v}"` : v}`)
-    .join(', ');
-
-  let summary = `${action}(${paramStr})`;
-
-  if (msg.outcome === 'success' && msg.urlChanged) {
-    summary += ' \u2192 navigated';
-  } else if (msg.outcome !== 'success' && msg.reason) {
-    const shortReason = msg.reason.split('.')[0];
-    summary += ` \u2192 ${shortReason}`;
+  switch (action) {
+    case 'click': return `Clicked ${id ? `element` : 'on page'}`;
+    case 'tap_coordinates': return `Tapped at (${params.x}, ${params.y})`;
+    case 'type': return `Typed "${text}"`;
+    case 'fill': return `Filled "${text}"`;
+    case 'select': return `Selected "${value}"`;
+    case 'scroll': return `Scrolled ${params.direction}`;
+    case 'hover': return `Hovered element`;
+    case 'focus': return `Focused element`;
+    case 'gettext': return `Read text from element`;
+    case 'eval': return `Ran JavaScript`;
+    case 'go_back': return `Went back`;
+    case 'wait': return `Waited for ${params.condition || 'page'}`;
+    case 'finish': return (params.message as string) || 'Done';
+    default: return action;
   }
+}
 
-  return `${icon} ${summary}`;
+function ThinkingIndicator({ loopState }: { loopState: string }) {
+  const label =
+    loopState === 'observing' ? 'Looking at page...' :
+    loopState === 'reasoning' ? 'Thinking...' :
+    loopState === 'acting' ? 'Taking action...' :
+    loopState === 'validating' ? 'Checking result...' :
+    loopState === 'retrying' ? 'Retrying...' :
+    null;
+
+  if (!label) return null;
+
+  return (
+    <View style={styles.thinkingRow}>
+      <View style={styles.thinkingDot} />
+      <Text style={styles.thinkingText}>{label}</Text>
+    </View>
+  );
 }
 
 function ChatMessageRow({ message }: { message: ChatMessage }) {
@@ -55,11 +72,20 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
     if (message.status === 'started') return null;
 
     const isError = message.status === 'error' || message.status === 'stopped';
+    const isFinished = message.status === 'finished';
 
     return (
-      <View style={styles.agentRow}>
-        <View style={[styles.statusBubble, isError && styles.statusBubbleError]}>
-          <Text style={[styles.statusBubbleText, isError && styles.statusBubbleTextError]}>
+      <View style={styles.infoBoxRow}>
+        <View style={[
+          styles.infoBox,
+          isFinished && styles.infoBoxSuccess,
+          isError && styles.infoBoxError,
+        ]}>
+          <Text style={[
+            styles.infoBoxText,
+            isFinished && styles.infoBoxTextSuccess,
+            isError && styles.infoBoxTextError,
+          ]}>
             {message.message}
           </Text>
         </View>
@@ -69,11 +95,21 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
 
   if (message.type === 'agent_step') {
     const isSuccess = message.outcome === 'success';
+    const humanized = humanizeAction(message.action, message.params);
+    const detail = message.urlChanged ? 'Navigated to new page' :
+      (!isSuccess && message.reason) ? message.reason.split('.')[0] : null;
+
     return (
-      <View style={styles.agentRow}>
-        <Text style={[styles.stepText, !isSuccess && styles.stepTextFailed]}>
-          {formatStep(message)}
-        </Text>
+      <View style={styles.stepRow}>
+        <View style={[styles.stepDot, isSuccess ? styles.stepDotSuccess : styles.stepDotFail]} />
+        <View style={styles.stepContent}>
+          <Text style={[styles.stepLabel, !isSuccess && styles.stepLabelFail]}>
+            {humanized}
+          </Text>
+          {detail && (
+            <Text style={styles.stepDetail}>{detail}</Text>
+          )}
+        </View>
       </View>
     );
   }
@@ -194,6 +230,7 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
             keyExtractor={(_: ChatMessage, i: number) => String(i)}
             renderItem={({ item }: { item: ChatMessage }) => <ChatMessageRow message={item} />}
             contentContainerStyle={styles.listContent}
+            ListFooterComponent={isRunning ? <ThinkingIndicator loopState={loopState} /> : null}
           />
         ) : (
           <View style={styles.emptyContent}>
@@ -342,35 +379,90 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  agentRow: {
+  // Steps
+  stepRow: {
+    flexDirection: 'row',
     alignItems: 'flex-start',
+    gap: 10,
   },
-  stepText: {
-    color: '#888',
+  stepDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 6,
+  },
+  stepDotSuccess: {
+    backgroundColor: '#555',
+  },
+  stepDotFail: {
+    backgroundColor: '#ff4747',
+  },
+  stepContent: {
+    flex: 1,
+    gap: 2,
+  },
+  stepLabel: {
+    color: '#aaa',
     fontSize: 13,
     lineHeight: 18,
   },
-  stepTextFailed: {
+  stepLabelFail: {
     color: '#ff4747',
   },
-  statusBubble: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    borderBottomLeftRadius: 4,
+  stepDetail: {
+    color: '#555',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  // Info boxes (success/error)
+  infoBoxRow: {
+    paddingVertical: 2,
+  },
+  infoBox: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.03)',
     paddingHorizontal: 14,
     paddingVertical: 10,
-    maxWidth: '85%',
   },
-  statusBubbleError: {
-    backgroundColor: 'rgba(255,71,71,0.1)',
+  infoBoxSuccess: {
+    borderColor: 'rgba(0,212,126,0.3)',
+    backgroundColor: 'rgba(0,212,126,0.06)',
   },
-  statusBubbleText: {
+  infoBoxError: {
+    borderColor: 'rgba(255,71,71,0.3)',
+    backgroundColor: 'rgba(255,71,71,0.06)',
+  },
+  infoBoxText: {
     color: '#888',
     fontSize: 13,
     lineHeight: 18,
   },
-  statusBubbleTextError: {
+  infoBoxTextSuccess: {
+    color: '#00d47e',
+  },
+  infoBoxTextError: {
     color: '#ff4747',
+  },
+  // Thinking indicator
+  thinkingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  thinkingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#555',
+    opacity: 0.6,
+  },
+  thinkingText: {
+    color: '#555',
+    fontSize: 13,
+    fontStyle: 'italic',
   },
   emptyContent: {
     flex: 1,
