@@ -52,9 +52,9 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
 
   if (message.type === 'agent_status') {
     const color =
-      message.status === 'finished' ? '#4ade80' :
-      message.status === 'error' || message.status === 'stopped' ? '#f87171' :
-      '#7dd3fc';
+      message.status === 'finished' ? '#00d47e' :
+      message.status === 'error' || message.status === 'stopped' ? '#ff4747' :
+      '#888';
 
     return (
       <View style={styles.statusRow}>
@@ -92,7 +92,6 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
     loopState === 'yielded' ||
     loopState === 'failed';
 
-  // Auto-expand when agent starts
   useEffect(() => {
     if (isRunning) {
       sheetRef.current?.snapToIndex(1);
@@ -104,11 +103,11 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
       ref={sheetRef}
       snapPoints={snapPoints}
       index={0}
-      backgroundStyle={styles.background}
-      handleIndicatorStyle={styles.handleIndicator}
+      backgroundStyle={styles.sheetBg}
+      handleIndicatorStyle={styles.handle}
       enablePanDownToClose={false}
     >
-      {/* Goal input row */}
+      {/* Goal input */}
       <View style={styles.goalRow}>
         <TextInput
           editable={!isRunning}
@@ -119,7 +118,7 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
             }
           }}
           placeholder="What should the agent do?"
-          placeholderTextColor="#506680"
+          placeholderTextColor="#555"
           returnKeyType="go"
           style={[styles.goalInput, isRunning && styles.goalInputRunning]}
           value={goal}
@@ -134,9 +133,9 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
               useAgentSessionStore.getState().setLoopState('idle');
               useAgentSessionStore.getState().setLastError(null);
             }}
-            style={styles.goButton}
+            style={styles.secondaryButton}
           >
-            <Text style={styles.goButtonText}>New</Text>
+            <Text style={styles.secondaryButtonText}>New</Text>
           </Pressable>
         ) : (
           <Pressable
@@ -147,26 +146,19 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
               (!modelReady || !goal.trim()) && styles.buttonDisabled,
             ]}
           >
-            <Text
-              style={[
-                styles.goButtonText,
-                (!modelReady || !goal.trim()) && styles.buttonTextDisabled,
-              ]}
-            >
-              Go
-            </Text>
+            <Text style={styles.goButtonText}>Go</Text>
           </Pressable>
         )}
       </View>
 
-      {/* Tab bar */}
+      {/* Tabs */}
       <View style={styles.tabBar}>
         <Pressable
           onPress={() => setActiveTab('chat')}
           style={[styles.tab, activeTab === 'chat' && styles.tabActive]}
         >
           <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>
-            Chat
+            CHAT
           </Text>
         </Pressable>
         <Pressable
@@ -174,7 +166,7 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
           style={[styles.tab, activeTab === 'debug' && styles.tabActive]}
         >
           <Text style={[styles.tabText, activeTab === 'debug' && styles.tabTextActive]}>
-            Debug
+            DEBUG
           </Text>
         </Pressable>
       </View>
@@ -203,117 +195,132 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
 }
 
 const styles = StyleSheet.create({
-  background: {
-    backgroundColor: '#0d1728',
+  sheetBg: {
+    backgroundColor: '#111',
   },
-  handleIndicator: {
-    backgroundColor: '#2a3f5c',
-    width: 36,
+  handle: {
+    backgroundColor: '#333',
+    width: 32,
+    height: 3,
   },
   goalRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingBottom: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
     gap: 8,
   },
   goalInput: {
     flex: 1,
-    backgroundColor: '#101927',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#1f344d',
-    color: '#f8fafc',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#222',
+    color: '#ededed',
     fontSize: 14,
-    height: 36,
-    paddingHorizontal: 14,
+    height: 38,
+    paddingHorizontal: 12,
   },
   goalInputRunning: {
-    borderColor: '#38bdf8',
-    opacity: 0.7,
+    borderColor: '#333',
+    opacity: 0.6,
   },
   goButton: {
-    backgroundColor: '#38bdf8',
-    borderRadius: 18,
-    height: 36,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    height: 38,
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
   },
   goButtonText: {
-    color: '#0b1117',
+    color: '#000',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   stopButton: {
-    backgroundColor: '#7f1d1d',
-    borderRadius: 18,
-    height: 36,
+    backgroundColor: 'rgba(255,71,71,0.15)',
+    borderRadius: 8,
+    height: 38,
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
   },
   stopButtonText: {
-    color: '#fca5a5',
+    color: '#ff4747',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    backgroundColor: '#222',
+    borderRadius: 8,
+    height: 38,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  secondaryButtonText: {
+    color: '#ededed',
+    fontSize: 14,
+    fontWeight: '600',
   },
   buttonDisabled: {
-    opacity: 0.4,
-  },
-  buttonTextDisabled: {
-    opacity: 0.6,
+    opacity: 0.3,
   },
   tabBar: {
     flexDirection: 'row',
-    gap: 2,
-    paddingHorizontal: 12,
-    paddingBottom: 6,
+    gap: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#222',
   },
   tab: {
-    paddingHorizontal: 14,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
   tabActive: {
-    backgroundColor: '#172540',
+    borderBottomColor: '#ededed',
   },
   tabText: {
-    color: '#506680',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#555',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.8,
   },
   tabTextActive: {
-    color: '#7dd3fc',
+    color: '#ededed',
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
   },
   userRow: {
     alignItems: 'flex-end',
   },
   userBubble: {
-    backgroundColor: '#1e3a5f',
-    borderRadius: 16,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
     borderBottomRightRadius: 4,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    maxWidth: '80%',
+    paddingVertical: 10,
+    maxWidth: '85%',
   },
   userText: {
-    color: '#f8fafc',
+    color: '#ededed',
     fontSize: 14,
+    lineHeight: 20,
   },
   agentRow: {
     alignItems: 'flex-start',
   },
   stepText: {
-    color: '#8ca0bd',
-    fontSize: 12,
-    fontFamily: 'Menlo',
+    color: '#888',
+    fontSize: 13,
+    lineHeight: 18,
   },
   stepTextFailed: {
-    color: '#f87171',
+    color: '#ff4747',
   },
   statusRow: {
     alignItems: 'center',
@@ -321,16 +328,16 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   emptyContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingVertical: 24,
   },
   emptyText: {
-    color: '#506680',
+    color: '#555',
     fontSize: 13,
   },
 });

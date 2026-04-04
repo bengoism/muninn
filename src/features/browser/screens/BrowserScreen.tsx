@@ -1034,7 +1034,7 @@ function mapResponseToLoopState(response: InferenceResponse) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#0b1117',
+    backgroundColor: '#000',
   },
   container: {
     flex: 1,
@@ -1292,13 +1292,7 @@ const styles = StyleSheet.create({
   },
   webviewFrame: {
     flex: 1,
-    marginHorizontal: 4,
-    marginTop: 4,
-    marginBottom: 0,
     overflow: 'hidden',
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#17263b',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fff',
   },
 });
