@@ -156,16 +156,25 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
       onPanResponderGrant: () => {
-        dragStart.current = currentHeight.current;
+        heightAnim.stopAnimation((v) => {
+          currentHeight.current = v;
+          dragStart.current = v;
+        });
       },
       onPanResponderMove: (_, g) => {
         const newH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, dragStart.current - g.dy));
         heightAnim.setValue(newH);
       },
       onPanResponderRelease: (_, g) => {
-        const projected = dragStart.current - g.dy - g.vy * 150;
+        const finalH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, dragStart.current - g.dy));
+        const projected = finalH - g.vy * 200;
         const target = snapTo(projected);
-        animateTo(target);
+        currentHeight.current = target;
+        Animated.timing(heightAnim, {
+          toValue: target,
+          duration: 200,
+          useNativeDriver: false,
+        }).start();
         if (target === SNAP_COLLAPSED) Keyboard.dismiss();
       },
     })
