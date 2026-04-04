@@ -24,6 +24,7 @@ struct AgentRuntimeRequest {
   let screenshotUri: String
   let screenshotUrl: URL
   let axSnapshot: [[String: Any]]
+  let axTreeText: String
   let actionHistory: [[String: Any]]
   let runtimeMode: RuntimeMode
 
@@ -72,6 +73,7 @@ struct AgentRuntimeRequest {
     self.screenshotUri = screenshotUri
     self.screenshotUrl = screenshotUrl
     self.axSnapshot = dictionary["axSnapshot"] as? [[String: Any]] ?? []
+    self.axTreeText = dictionary["axTreeText"] as? String ?? ""
     self.actionHistory = dictionary["actionHistory"] as? [[String: Any]] ?? []
     self.runtimeMode = runtimeMode
   }
@@ -280,8 +282,8 @@ struct AgentRuntimeAllowlistedModel {
     approximateSizeBytes: 2_583_085_056,
     liteRTLMRuntimeConfig: AgentRuntimeLiteRTLMRuntimeConfig(
       preferredBackends: ["cpu", "gpu"],
-      maxNumTokens: 4096,
-      maxOutputTokens: 192,
+      maxNumTokens: 6144,
+      maxOutputTokens: 1024,
       sampler: AgentRuntimeLiteRTLMSamplerConfig(
         type: .topP,
         topK: 1,

@@ -52,7 +52,6 @@ export async function executeTool(
 
   // Non-browser actions.
   if (!definition.requiresBrowser) {
-    // wait
     await new Promise((r) => setTimeout(r, 1000));
     return { ok: true, action, reason: null, durationMs: Date.now() - startedAt };
   }
@@ -76,6 +75,18 @@ export async function executeTool(
       break;
     case 'type':
       jsCall = `window.__MUNINN_ACTIONS__.type("${escapeJS(String(params.id))}", "${escapeJS(String(params.text))}")`;
+      break;
+    case 'fill':
+      jsCall = `window.__MUNINN_ACTIONS__.fill("${escapeJS(String(params.id))}", "${escapeJS(String(params.text))}")`;
+      break;
+    case 'select':
+      jsCall = `window.__MUNINN_ACTIONS__.select("${escapeJS(String(params.id))}", "${escapeJS(String(params.value))}")`;
+      break;
+    case 'gettext':
+      jsCall = `window.__MUNINN_ACTIONS__.gettext("${escapeJS(String(params.id))}")`;
+      break;
+    case 'wait':
+      jsCall = `window.__MUNINN_ACTIONS__.waitForCondition("${escapeJS(String(params.condition ?? 'idle'))}", ${Number(params.timeout ?? 3000)})`;
       break;
     case 'scroll':
       jsCall = `window.__MUNINN_ACTIONS__.scroll("${escapeJS(String(params.direction))}", "${escapeJS(String(params.amount))}")`;

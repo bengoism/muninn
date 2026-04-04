@@ -17,8 +17,10 @@ function makeSnapshot(
       ['btn-1', { x: 10, y: 20, width: 100, height: 40 }],
       ['input-2', { x: 10, y: 80, width: 200, height: 30 }],
     ]),
+    axNodeRoles: new Map(),
     axNodeCount: 2,
     focusedElementId: null,
+    hasDialog: false,
     timestamp: Date.now(),
     ...overrides,
   };

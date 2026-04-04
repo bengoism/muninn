@@ -19,6 +19,7 @@ type StitchObservationInput = {
 
 type StitchObservationOutput = {
   axSnapshot: AxNode[];
+  axTreeText: string;
   frameSnapshots: ObservationFrameSnapshot[];
   warnings: string[];
 };
@@ -141,8 +142,14 @@ export function stitchObservationArtifacts(
     }) satisfies AxNode);
   });
 
+  const axTreeText = input.responses
+    .map((response) => response.payload.treeText || '')
+    .filter(Boolean)
+    .join('\n');
+
   return {
     axSnapshot,
+    axTreeText,
     frameSnapshots,
     warnings,
   };

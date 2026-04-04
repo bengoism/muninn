@@ -2,7 +2,7 @@ import ExpoModulesCore
 import UIKit
 import WebKit
 
-class BrowserHostView: ExpoView, WKNavigationDelegate {
+class BrowserHostView: ExpoView, WKNavigationDelegate, WKUIDelegate {
   static let telemetryHandlerName = "muninnBrowserHostTelemetry"
 
   private lazy var telemetryMessageHandler = BrowserHostScriptMessageHandler(owner: self)
@@ -34,6 +34,7 @@ class BrowserHostView: ExpoView, WKNavigationDelegate {
     clipsToBounds = true
     webView.allowsBackForwardNavigationGestures = true
     webView.navigationDelegate = self
+    webView.uiDelegate = self
 
     addSubview(webView)
 
@@ -297,6 +298,20 @@ class BrowserHostView: ExpoView, WKNavigationDelegate {
   func webView(_ webView: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError error: Error) {
     emitNavigationError(error, fallbackUrl: currentUrl())
     emitNavigationState()
+  }
+
+  // MARK: - WKUIDelegate (auto-dismiss JS dialogs)
+
+  func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+    completionHandler()
+  }
+
+  func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+    completionHandler(true)
+  }
+
+  func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+    completionHandler(defaultText)
   }
 
   func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {

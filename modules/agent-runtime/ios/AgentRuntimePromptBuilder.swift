@@ -4,14 +4,19 @@ final class AgentRuntimePromptBuilder {
 
   private static let actionSchema = """
     Available actions:
-    - click(id: string) — click an element by its accessibility ID
+    - click(id: string) — click an element by its ref ID
     - tap_coordinates(x: number, y: number) — tap at screen coordinates
-    - type(id: string, text: string) — type text into an input element
+    - type(id: string, text: string) — type text into an input (appends)
+    - fill(id: string, text: string) — clear input and set new text
+    - select(id: string, value: string) — pick a dropdown option by value or text
+    - gettext(id: string) — read text content of an element (returns text in reason field)
     - scroll(direction: "up"|"down"|"left"|"right", amount: "page"|"half"|"small")
     - go_back() — navigate back
-    - wait(condition: string) — wait for a condition
+    - wait(condition: string) — wait for condition: "idle", "url:<pattern>", "selector:<css>", "text:<substring>"
     - yield_to_user(reason: string) — ask the user for help
     - finish(status: "success"|"failure", message: string) — task complete
+
+    IMPORTANT: Elements with [ref=...] are interactive. You MUST use the exact ref value (e.g. "ai-main-abc-123") as the "id" parameter. Never use the element's label or description as the id.
     """
 
   func buildPrompt(
@@ -29,9 +34,11 @@ final class AgentRuntimePromptBuilder {
     parts.append("Viewport: \(screenshot.pixelWidth)x\(screenshot.pixelHeight)")
     parts.append("")
 
-    let axSummary = buildAXSummary(request.axSnapshot)
+    let axSummary = request.axTreeText.isEmpty
+      ? buildAXSummary(request.axSnapshot)
+      : request.axTreeText
     if !axSummary.isEmpty {
-      parts.append("Accessibility tree (visible elements):")
+      parts.append("Page content and interactive elements:")
       parts.append(axSummary)
       parts.append("")
     }
@@ -75,8 +82,19 @@ final class AgentRuntimePromptBuilder {
   }
 
   private func buildActionHistory(_ history: [[String: Any]]) -> String {
-    let recent = history.suffix(3)
-    let lines: [String] = recent.compactMap { entry in
+    let total = history.count
+    var lines: [String] = []
+
+    // Summary line when there's more history than shown.
+    if total > 5 {
+      let succeeded = history.filter { ($0["status"] as? String) == "succeeded" }.count
+      let failed = total - succeeded
+      lines.append("  (session: \(total) actions, \(succeeded) succeeded, \(failed) failed)")
+    }
+
+    // Show last 5 in detail.
+    let recent = history.suffix(5)
+    for entry in recent {
       let action = entry["action"] as? String ?? "unknown"
       let status = entry["status"] as? String ?? ""
       let params = entry["parameters"] as? [String: Any] ?? [:]
@@ -89,10 +107,10 @@ final class AgentRuntimePromptBuilder {
       var line = "  - \(action)\(paramSummary) → \(status)"
 
       if let before = urlBefore, let after = urlAfter, before != after {
-        line += " (page navigated from \(before) to \(after))"
+        line += " (navigated to \(after))"
       }
 
-      return line
+      lines.append(line)
     }
     return lines.joined(separator: "\n")
   }

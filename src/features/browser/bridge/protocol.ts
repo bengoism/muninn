@@ -345,6 +345,7 @@ export function parseBrowserBridgeMessage(
       frame,
       payload: {
         requestId: parsed.payload.requestId,
+        treeText: isString(parsed.payload.treeText) ? parsed.payload.treeText : '',
         observedAt: parsed.payload.observedAt,
         nodes: parsed.payload.nodes.map((node) => ({
           id: node.id,

@@ -26,6 +26,32 @@ export const TOOL_REGISTRY: Record<ToolName, ToolDefinition> = {
     terminal: false,
     requiresBrowser: true,
   },
+  fill: {
+    name: 'fill',
+    params: {
+      id: { type: 'string', required: true },
+      text: { type: 'string', required: true },
+    },
+    terminal: false,
+    requiresBrowser: true,
+  },
+  select: {
+    name: 'select',
+    params: {
+      id: { type: 'string', required: true },
+      value: { type: 'string', required: true },
+    },
+    terminal: false,
+    requiresBrowser: true,
+  },
+  gettext: {
+    name: 'gettext',
+    params: {
+      id: { type: 'string', required: true },
+    },
+    terminal: false,
+    requiresBrowser: true,
+  },
   scroll: {
     name: 'scroll',
     params: {
@@ -43,9 +69,12 @@ export const TOOL_REGISTRY: Record<ToolName, ToolDefinition> = {
   },
   wait: {
     name: 'wait',
-    params: { condition: { type: 'string', required: false } },
+    params: {
+      condition: { type: 'string', required: false },
+      timeout: { type: 'number', required: false },
+    },
     terminal: false,
-    requiresBrowser: false,
+    requiresBrowser: true,
   },
   yield_to_user: {
     name: 'yield_to_user',

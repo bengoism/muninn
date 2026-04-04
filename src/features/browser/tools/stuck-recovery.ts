@@ -42,7 +42,23 @@ export function diagnoseStuckState(
   // 2. Repeated identical failure: last 2 records have the same action,
   //    same parameters, and both failed-ish.
   if (hasRepeatedIdenticalFailure(actionHistory)) {
-    // If we've already tried re-observing, stop.
+    if (reobservesSinceLastProgress >= 2) {
+      return {
+        stuck: true,
+        reason: 'repeated_identical_failure',
+        recovery: 'stop',
+      };
+    }
+    return {
+      stuck: true,
+      reason: 'repeated_identical_failure',
+      recovery: 'reobserve',
+    };
+  }
+
+  // 2b. Repeated identical action (any status): last 3 records have the
+  //     same action and same parameters — the model is looping.
+  if (hasRepeatedIdenticalAction(actionHistory, 3)) {
     if (reobservesSinceLastProgress >= 2) {
       return {
         stuck: true,
@@ -86,6 +102,28 @@ const FAILURE_STATUSES = new Set([
   'blocked',
   'stale_ref',
 ]);
+
+function hasRepeatedIdenticalAction(
+  history: AgentActionRecord[],
+  count: number,
+): boolean {
+  if (history.length < count) return false;
+
+  const recent = history.slice(-count);
+  const first = recent[0];
+
+  return recent.every((record) => {
+    if (record.action !== first.action) return false;
+    const firstKeys = Object.keys(first.parameters).sort();
+    const recordKeys = Object.keys(record.parameters).sort();
+    if (firstKeys.length !== recordKeys.length) return false;
+    for (let i = 0; i < firstKeys.length; i++) {
+      if (firstKeys[i] !== recordKeys[i]) return false;
+      if (first.parameters[firstKeys[i]] !== record.parameters[recordKeys[i]]) return false;
+    }
+    return true;
+  });
+}
 
 function hasRepeatedIdenticalFailure(
   history: AgentActionRecord[],

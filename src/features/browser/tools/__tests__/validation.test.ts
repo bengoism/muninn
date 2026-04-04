@@ -18,8 +18,10 @@ function makeSnapshot(
       ['input-2', { x: 10, y: 80, width: 200, height: 30 }],
       ['link-3', { x: 10, y: 130, width: 150, height: 20 }],
     ]),
+    axNodeRoles: new Map(),
     axNodeCount: 3,
     focusedElementId: null,
+    hasDialog: false,
     timestamp: Date.now(),
     ...overrides,
   };
@@ -304,5 +306,58 @@ describe('classifyOutcome — wait', () => {
       after,
     );
     expect(result.outcome).toBe('success');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyOutcome — dialog/overlay detection
+// ---------------------------------------------------------------------------
+
+describe('classifyOutcome — dialog detection', () => {
+  it('returns blocked when hasDialog transitions from false to true', () => {
+    const before = makeSnapshot({ hasDialog: false });
+    const after = makeSnapshot({ hasDialog: true });
+    const result = classifyOutcome('click', { id: 'btn-1' }, makeToolResult(), before, after);
+    expect(result.outcome).toBe('blocked');
+  });
+
+  it('returns blocked when a new node with role=dialog appears', () => {
+    const before = makeSnapshot();
+    const after = makeSnapshot({
+      axNodeIds: new Set(['btn-1', 'input-2', 'link-3', 'dialog-1']),
+      axNodeRoles: new Map([['dialog-1', 'dialog']]),
+      axNodeCount: 4,
+    });
+    const result = classifyOutcome('click', { id: 'btn-1' }, makeToolResult(), before, after);
+    expect(result.outcome).toBe('blocked');
+  });
+
+  it('returns blocked when a new node with role=alertdialog appears', () => {
+    const before = makeSnapshot();
+    const after = makeSnapshot({
+      axNodeIds: new Set(['btn-1', 'input-2', 'link-3', 'alert-1']),
+      axNodeRoles: new Map([['alert-1', 'alertdialog']]),
+      axNodeCount: 4,
+    });
+    const result = classifyOutcome('click', { id: 'btn-1' }, makeToolResult(), before, after);
+    expect(result.outcome).toBe('blocked');
+  });
+
+  it('does not return blocked when dialog was already present before action', () => {
+    const before = makeSnapshot({ hasDialog: true });
+    const after = makeSnapshot({ hasDialog: true });
+    const result = classifyOutcome('click', { id: 'btn-1' }, makeToolResult(), before, after);
+    expect(result.outcome).not.toBe('blocked');
+  });
+
+  it('does not return blocked when new nodes have non-dialog roles', () => {
+    const before = makeSnapshot();
+    const after = makeSnapshot({
+      axNodeIds: new Set(['btn-1', 'input-2', 'link-3', 'new-btn']),
+      axNodeRoles: new Map([['new-btn', 'button']]),
+      axNodeCount: 4,
+    });
+    const result = classifyOutcome('click', { id: 'btn-1' }, makeToolResult(), before, after);
+    expect(result.outcome).not.toBe('blocked');
   });
 });

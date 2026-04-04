@@ -18,7 +18,9 @@ type RawValidationState = {
   scrollY: number;
   axNodeIds: string[];
   axNodeBounds: Record<string, Bounds>;
+  axNodeRoles: Record<string, string>;
   focusedElementId: string | null;
+  hasDialog: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -54,8 +56,10 @@ export async function captureValidationSnapshot(
       scrollY: 0,
       axNodeIds: new Set(),
       axNodeBounds: new Map(),
+      axNodeRoles: new Map(),
       axNodeCount: 0,
       focusedElementId: null,
+      hasDialog: false,
       timestamp: Date.now(),
     };
   }
@@ -65,6 +69,10 @@ export async function captureValidationSnapshot(
   for (const [id, b] of Object.entries(raw.axNodeBounds)) {
     axNodeBounds.set(id, b);
   }
+  const axNodeRoles = new Map<string, string>();
+  for (const [id, role] of Object.entries(raw.axNodeRoles ?? {})) {
+    axNodeRoles.set(id, role);
+  }
 
   return {
     url: browserState.currentUrl,
@@ -72,8 +80,10 @@ export async function captureValidationSnapshot(
     scrollY: raw.scrollY,
     axNodeIds: new Set(raw.axNodeIds),
     axNodeBounds,
+    axNodeRoles,
     axNodeCount: raw.axNodeIds.length,
     focusedElementId: raw.focusedElementId,
+    hasDialog: raw.hasDialog ?? false,
     timestamp: Date.now(),
   };
 }
@@ -127,17 +137,23 @@ function computeSignals(
 }
 
 function hasDialogAppeared(
-  _before: ValidationSnapshot,
-  _after: ValidationSnapshot,
+  before: ValidationSnapshot,
+  after: ValidationSnapshot,
 ): boolean {
-  // Heuristic: a large number of new nodes appearing simultaneously can
-  // indicate an overlay/modal. A more precise check would inspect AX roles,
-  // but the lightweight snapshot only collects IDs and bounds. For v1 we
-  // detect whether many new nodes appeared whose bounding boxes overlap the
-  // centre of the viewport (a rough proxy for "something popped up on top").
-  //
-  // TODO(#7): refine once we include role data in the validation snapshot.
-  return false;
+  // Direct detection: the JS bridge found a visible dialog/modal element.
+  if (!before.hasDialog && after.hasDialog) {
+    return true;
+  }
+
+  // Heuristic: check if new nodes with dialog/alertdialog role appeared.
+  const newDialogNodes = [...after.axNodeIds]
+    .filter((id) => !before.axNodeIds.has(id))
+    .filter((id) => {
+      const role = after.axNodeRoles.get(id);
+      return role === 'dialog' || role === 'alertdialog';
+    });
+
+  return newDialogNodes.length > 0;
 }
 
 export function classifyOutcome(
@@ -174,11 +190,17 @@ export function classifyOutcome(
     case 'tap_coordinates':
       return classifyClick(signals, params);
     case 'type':
+    case 'fill':
+      return classifyType(signals, params);
+    case 'select':
       return classifyType(signals, params);
     case 'scroll':
       return classifyScroll(signals, params);
     case 'go_back':
       return classifyGoBack(signals);
+    case 'gettext':
+      // Read-only — always success if executor succeeded.
+      return { outcome: 'success', signals, reason: null };
     default:
       // wait, finish, yield_to_user — always success from executor.
       return { outcome: 'success', signals, reason: null };

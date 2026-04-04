@@ -39,8 +39,10 @@ export type ValidationSnapshot = {
   scrollY: number;
   axNodeIds: Set<string>;
   axNodeBounds: Map<string, Bounds>;
+  axNodeRoles: Map<string, string>;
   axNodeCount: number;
   focusedElementId: string | null;
+  hasDialog: boolean;
   timestamp: number;
 };
 

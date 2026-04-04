@@ -76,6 +76,120 @@ export const ACTIONS_INJECTION_SCRIPT = `
       return { ok: true, reason: null };
     },
 
+    fill: function(elementId, text) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      el.focus();
+      try {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          var nativeSetter = Object.getOwnPropertyDescriptor(
+            Object.getPrototypeOf(el).constructor.prototype, 'value'
+          );
+          if (nativeSetter && nativeSetter.set) {
+            nativeSetter.set.call(el, text);
+          } else {
+            el.value = text;
+          }
+        } else if ('value' in el) {
+          el.value = text;
+        } else {
+          el.textContent = text;
+        }
+      } catch (e) {
+        try { el.value = text; } catch (_) {}
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, reason: null };
+    },
+
+    select: function(elementId, value) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      if (!(el instanceof HTMLSelectElement)) {
+        // Fallback: click the element (e.g. custom dropdown/autocomplete item).
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        dispatchMouseEvents(el);
+        return { ok: true, reason: 'Clicked non-select element as fallback' };
+      }
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      // Try matching by value first, then by visible text.
+      var found = false;
+      for (var i = 0; i < el.options.length; i++) {
+        if (el.options[i].value === value || el.options[i].text === value) {
+          el.selectedIndex = i;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // Fuzzy match: case-insensitive contains.
+        var lower = value.toLowerCase();
+        for (var j = 0; j < el.options.length; j++) {
+          if (el.options[j].text.toLowerCase().indexOf(lower) !== -1) {
+            el.selectedIndex = j;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        return { ok: false, reason: 'No matching option for: ' + value };
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, reason: null };
+    },
+
+    waitForCondition: function(condition, timeoutMs) {
+      // Returns a promise that resolves when condition is met or timeout.
+      // Conditions: 'idle' (default), 'url:pattern', 'selector:css', 'text:substring'
+      timeoutMs = timeoutMs || 3000;
+      condition = condition || 'idle';
+      return new Promise(function(resolve) {
+        var start = Date.now();
+        function check() {
+          if (Date.now() - start > timeoutMs) {
+            return resolve({ ok: true, reason: 'timeout' });
+          }
+          var met = false;
+          if (condition === 'idle') {
+            met = document.readyState === 'complete';
+          } else if (condition.indexOf('url:') === 0) {
+            met = window.location.href.indexOf(condition.substring(4)) !== -1;
+          } else if (condition.indexOf('selector:') === 0) {
+            met = document.querySelector(condition.substring(9)) !== null;
+          } else if (condition.indexOf('text:') === 0) {
+            met = (document.body.innerText || '').indexOf(condition.substring(5)) !== -1;
+          } else {
+            met = true;
+          }
+          if (met) {
+            return resolve({ ok: true, reason: null });
+          }
+          setTimeout(check, 200);
+        }
+        check();
+      });
+    },
+
+    gettext: function(elementId) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      var text = '';
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        text = el.value || '';
+      } else if (el instanceof HTMLSelectElement) {
+        var opt = el.options[el.selectedIndex];
+        text = opt ? opt.text : '';
+      } else {
+        text = (typeof el.innerText === 'string' ? el.innerText : el.textContent) || '';
+      }
+      text = text.trim();
+      return { ok: true, reason: text || '(empty)' };
+    },
+
     scroll: function(direction, amount) {
       var distances = {
         page: 600, half: 300, small: 100
@@ -94,6 +208,7 @@ export const ACTIONS_INJECTION_SCRIPT = `
     captureValidationState: function() {
       var ids = [];
       var bounds = {};
+      var roles = {};
       var els = document.querySelectorAll('[data-ai-internal-id]');
       for (var i = 0; i < els.length; i++) {
         var el = els[i];
@@ -102,13 +217,32 @@ export const ACTIONS_INJECTION_SCRIPT = `
         ids.push(id);
         var rect = el.getBoundingClientRect();
         bounds[id] = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+        var role = el.getAttribute('role') || '';
+        if (role) roles[id] = role;
       }
       var focused = document.activeElement;
+
+      // Detect visible dialog/modal elements in the DOM.
+      var hasDialog = false;
+      var dialogEls = document.querySelectorAll(
+        'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+      );
+      for (var d = 0; d < dialogEls.length; d++) {
+        var de = dialogEls[d];
+        var dr = de.getBoundingClientRect();
+        if (dr.width > 0 && dr.height > 0) {
+          hasDialog = true;
+          break;
+        }
+      }
+
       return {
         scrollY: window.scrollY,
         axNodeIds: ids,
         axNodeBounds: bounds,
-        focusedElementId: focused ? focused.getAttribute('data-ai-internal-id') : null
+        axNodeRoles: roles,
+        focusedElementId: focused ? focused.getAttribute('data-ai-internal-id') : null,
+        hasDialog: hasDialog
       };
     }
   };
