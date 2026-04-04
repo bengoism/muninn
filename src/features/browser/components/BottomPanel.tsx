@@ -196,7 +196,9 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
 
 const styles = StyleSheet.create({
   sheetBg: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#222',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#333',
   },
   handle: {
     backgroundColor: '#333',
