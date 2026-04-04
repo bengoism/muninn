@@ -196,7 +196,7 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
 
 const styles = StyleSheet.create({
   sheetBg: {
-    backgroundColor: '#141414',
+    backgroundColor: '#1a1a1a',
   },
   handle: {
     backgroundColor: '#333',
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   },
   goalInput: {
     flex: 1,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: '#2a2a2a',
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#222',
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: '#222',
+    backgroundColor: '#333',
     borderRadius: 8,
     height: 38,
     justifyContent: 'center',
@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   userBubble: {
-    backgroundColor: '#1e1e1e',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     borderBottomRightRadius: 4,
     paddingHorizontal: 14,
