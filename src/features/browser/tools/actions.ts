@@ -108,7 +108,10 @@ export const ACTIONS_INJECTION_SCRIPT = `
       var el = findById(elementId);
       if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
       if (!(el instanceof HTMLSelectElement)) {
-        return { ok: false, reason: 'Element is not a <select>: ' + elementId };
+        // Fallback: click the element (e.g. custom dropdown/autocomplete item).
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        dispatchMouseEvents(el);
+        return { ok: true, reason: 'Clicked non-select element as fallback' };
       }
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       // Try matching by value first, then by visible text.

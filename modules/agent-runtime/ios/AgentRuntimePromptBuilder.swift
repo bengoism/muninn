@@ -16,7 +16,7 @@ final class AgentRuntimePromptBuilder {
     - yield_to_user(reason: string) — ask the user for help
     - finish(status: "success"|"failure", message: string) — task complete
 
-    Elements with [ref=...] are interactive. Use the ref value as the "id" parameter for click, type, fill, and select actions.
+    IMPORTANT: Elements with [ref=...] are interactive. You MUST use the exact ref value (e.g. "ai-main-abc-123") as the "id" parameter. Never use the element's label or description as the id.
     """
 
   func buildPrompt(
