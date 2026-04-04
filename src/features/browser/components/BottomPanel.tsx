@@ -52,14 +52,17 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
   }
 
   if (message.type === 'agent_status') {
-    const color =
-      message.status === 'finished' ? '#00d47e' :
-      message.status === 'error' || message.status === 'stopped' ? '#ff4747' :
-      '#888';
+    if (message.status === 'started') return null;
+
+    const isError = message.status === 'error' || message.status === 'stopped';
 
     return (
-      <View style={styles.statusRow}>
-        <Text style={[styles.statusText, { color }]}>{message.message}</Text>
+      <View style={styles.agentRow}>
+        <View style={[styles.statusBubble, isError && styles.statusBubbleError]}>
+          <Text style={[styles.statusBubbleText, isError && styles.statusBubbleTextError]}>
+            {message.message}
+          </Text>
+        </View>
       </View>
     );
   }
@@ -335,13 +338,24 @@ const styles = StyleSheet.create({
   stepTextFailed: {
     color: '#ff4747',
   },
-  statusRow: {
-    alignItems: 'center',
-    paddingVertical: 4,
+  statusBubble: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    maxWidth: '85%',
   },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '500',
+  statusBubbleError: {
+    backgroundColor: 'rgba(255,71,71,0.1)',
+  },
+  statusBubbleText: {
+    color: '#888',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  statusBubbleTextError: {
+    color: '#ff4747',
   },
   emptyContent: {
     flex: 1,
