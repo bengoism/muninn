@@ -356,26 +356,28 @@ export function BrowserScreen() {
           title={title}
         />
 
-        <View style={styles.webviewFrame}>
-          <BrowserWebView
-            onLoadStart={handleBrowserLoadStart}
-            onNavigationError={setNavigationError}
-            onNavigationStateChange={applyNavigationState}
-            onProgressChange={setProgress}
-            onTelemetryMessage={handleTelemetryMessage}
-            onTelemetryProtocolError={handleTelemetryProtocolError}
-            ref={browserRef}
-            requestedUrl={requestedUrl}
+        <View style={{ flex: 1 }}>
+          <View style={styles.webviewFrame}>
+            <BrowserWebView
+              onLoadStart={handleBrowserLoadStart}
+              onNavigationError={setNavigationError}
+              onNavigationStateChange={applyNavigationState}
+              onProgressChange={setProgress}
+              onTelemetryMessage={handleTelemetryMessage}
+              onTelemetryProtocolError={handleTelemetryProtocolError}
+              ref={browserRef}
+              requestedUrl={requestedUrl}
+            />
+          </View>
+
+          <BottomPanel
+            onStart={(g) => agentLoop.start(g)}
+            onCancel={agentLoop.cancel}
+            isRunning={agentLoop.isRunning}
+            modelReady={hasDownloadedModel}
+            modelName={activeModel?.displayName ?? null}
           />
         </View>
-
-        <BottomPanel
-          onStart={(g) => agentLoop.start(g)}
-          onCancel={agentLoop.cancel}
-          isRunning={agentLoop.isRunning}
-          modelReady={hasDownloadedModel}
-          modelName={activeModel?.displayName ?? null}
-        />
 
         {showDiagnostics && (
         <ScrollView
@@ -1039,7 +1041,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#0b1117',
+    backgroundColor: '#1a1a1a',
   },
   panel: {
     maxHeight: 292,
