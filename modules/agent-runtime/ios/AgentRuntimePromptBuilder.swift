@@ -9,6 +9,7 @@ final class AgentRuntimePromptBuilder {
     - type(id: string, text: string) — type text into an input (appends)
     - fill(id: string, text: string) — clear input and set new text
     - select(id: string, value: string) — pick a dropdown option by value or text
+    - gettext(id: string) — read text content of an element (returns text in reason field)
     - scroll(direction: "up"|"down"|"left"|"right", amount: "page"|"half"|"small")
     - go_back() — navigate back
     - wait(condition: string) — wait for condition: "idle", "url:<pattern>", "selector:<css>", "text:<substring>"

@@ -171,6 +171,22 @@ export const ACTIONS_INJECTION_SCRIPT = `
       });
     },
 
+    gettext: function(elementId) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      var text = '';
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        text = el.value || '';
+      } else if (el instanceof HTMLSelectElement) {
+        var opt = el.options[el.selectedIndex];
+        text = opt ? opt.text : '';
+      } else {
+        text = (typeof el.innerText === 'string' ? el.innerText : el.textContent) || '';
+      }
+      text = text.trim();
+      return { ok: true, reason: text || '(empty)' };
+    },
+
     scroll: function(direction, amount) {
       var distances = {
         page: 600, half: 300, small: 100

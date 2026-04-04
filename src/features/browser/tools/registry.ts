@@ -44,6 +44,14 @@ export const TOOL_REGISTRY: Record<ToolName, ToolDefinition> = {
     terminal: false,
     requiresBrowser: true,
   },
+  gettext: {
+    name: 'gettext',
+    params: {
+      id: { type: 'string', required: true },
+    },
+    terminal: false,
+    requiresBrowser: true,
+  },
   scroll: {
     name: 'scroll',
     params: {

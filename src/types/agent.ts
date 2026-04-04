@@ -4,6 +4,7 @@ export type ToolName =
   | 'type'
   | 'fill'
   | 'select'
+  | 'gettext'
   | 'scroll'
   | 'go_back'
   | 'wait'

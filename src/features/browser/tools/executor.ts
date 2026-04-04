@@ -82,6 +82,9 @@ export async function executeTool(
     case 'select':
       jsCall = `window.__MUNINN_ACTIONS__.select("${escapeJS(String(params.id))}", "${escapeJS(String(params.value))}")`;
       break;
+    case 'gettext':
+      jsCall = `window.__MUNINN_ACTIONS__.gettext("${escapeJS(String(params.id))}")`;
+      break;
     case 'wait':
       jsCall = `window.__MUNINN_ACTIONS__.waitForCondition("${escapeJS(String(params.condition ?? 'idle'))}", ${Number(params.timeout ?? 3000)})`;
       break;

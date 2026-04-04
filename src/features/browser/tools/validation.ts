@@ -198,6 +198,9 @@ export function classifyOutcome(
       return classifyScroll(signals, params);
     case 'go_back':
       return classifyGoBack(signals);
+    case 'gettext':
+      // Read-only — always success if executor succeeded.
+      return { outcome: 'success', signals, reason: null };
     default:
       // wait, finish, yield_to_user — always success from executor.
       return { outcome: 'success', signals, reason: null };

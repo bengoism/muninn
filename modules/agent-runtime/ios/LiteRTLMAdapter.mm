@@ -584,6 +584,10 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
           @"id": @{ @"type": @"string", @"description": @"Select element ref ID" },
           @"value": @{ @"type": @"string", @"description": @"Option value or visible text" } },
           @"required": @[ @"id", @"value" ] } } },
+      @{ @"function": @{ @"name": @"gettext", @"description": @"Read the text content of an element",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" } },
+          @"required": @[ @"id" ] } } },
       @{ @"function": @{ @"name": @"scroll", @"description": @"Scroll the page",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"direction": @{ @"type": @"string", @"description": @"up, down, left, or right" },
