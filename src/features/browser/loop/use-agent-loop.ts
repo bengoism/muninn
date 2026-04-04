@@ -26,6 +26,15 @@ function delay(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Structured logging — streams to Metro bundler terminal
+// ---------------------------------------------------------------------------
+
+function logStep(step: number, phase: string, data: Record<string, unknown>) {
+  const tag = `[muninn:step-${step}:${phase}]`;
+  console.log(tag, JSON.stringify(data, null, 0));
+}
+
+// ---------------------------------------------------------------------------
 // Outcome → AgentActionStatus mapping
 // ---------------------------------------------------------------------------
 
@@ -87,12 +96,14 @@ export function useAgentLoop(
 
       resetSession();
       setGoal(goal);
+      console.log('[muninn:start]', JSON.stringify({ goal, runtimeMode }));
 
       const loopStartedAt = Date.now();
       let consecutiveNoOps = 0;
       let reobservesSinceLastProgress = 0;
 
       function stopLoop(reason: StopReason, message: string) {
+        console.log('[muninn:stop]', JSON.stringify({ reason, message }));
         setStopReason(reason);
         setLastError(message);
         setLoopState('failed');
@@ -126,6 +137,18 @@ export function useAgentLoop(
           }
           if (cancelledRef.current) break;
 
+          const stepNum = store.getState().stepCount + 1;
+          logStep(stepNum, 'observe', {
+            url: useBrowserStore.getState().currentUrl,
+            axNodes: observation.axSnapshot.length,
+            treeTextLen: observation.axTreeText.length,
+            quiescence: observation.quiescence.satisfied,
+            warnings: observation.warnings.length,
+          });
+          if (observation.axTreeText) {
+            console.log(`[muninn:step-${stepNum}:tree]\n${observation.axTreeText}`);
+          }
+
           // ---------------------------------------------------------------
           // 2. REASON
           // ---------------------------------------------------------------
@@ -142,11 +165,13 @@ export function useAgentLoop(
           setLastNativeResponse(inference);
 
           if (!inference.ok) {
+            logStep(stepNum, 'reason:fail', { code: inference.code, message: inference.message });
             stopLoop('unrecoverable_error', inference.message);
             break;
           }
 
           const { action, parameters } = inference as InferenceSuccess;
+          logStep(stepNum, 'reason', { action, parameters });
           const definition = TOOL_REGISTRY[action as ToolName];
 
           // ---------------------------------------------------------------
@@ -187,6 +212,12 @@ export function useAgentLoop(
             postSnapshot,
           );
 
+          logStep(stepNum, 'validate', {
+            outcome: validation.outcome,
+            reason: validation.reason,
+            signals: validation.signals,
+          });
+
           // Record primary action.
           const primaryTimestamp = new Date().toISOString();
           addActionRecord(
@@ -213,6 +244,10 @@ export function useAgentLoop(
           );
 
           if (directive.retry) {
+            logStep(stepNum, 'retry', {
+              fallback: directive.fallbackAction,
+              params: directive.fallbackParams,
+            });
             setLoopState('retrying');
             const retryResult = await executeTool(
               directive.fallbackAction,
@@ -256,6 +291,11 @@ export function useAgentLoop(
           );
 
           if (diagnosis.stuck) {
+            logStep(stepNum, 'stuck', {
+              recovery: diagnosis.recovery,
+              reason: diagnosis.reason,
+              consecutiveNoOps,
+            });
             if (diagnosis.recovery === 'stop') {
               stopLoop(
                 diagnosis.reason!,
