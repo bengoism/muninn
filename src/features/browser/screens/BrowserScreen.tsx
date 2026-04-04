@@ -333,11 +333,8 @@ export function BrowserScreen() {
   }, [modelStatus?.isDownloading, refreshModelDiagnostics, showDiagnostics]);
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.screen}
-    >
-      <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
+    <View style={styles.screen}>
+      <SafeAreaView edges={['top']} style={styles.container}>
         <BrowserChrome
           telemetryReady={telemetryReady}
           canGoBack={canGoBack}
@@ -356,28 +353,18 @@ export function BrowserScreen() {
           title={title}
         />
 
-        <View style={{ flex: 1, position: 'relative' }}>
-          <View style={styles.webviewFrame}>
-            <BrowserWebView
-              onLoadStart={handleBrowserLoadStart}
-              onNavigationError={setNavigationError}
-              onNavigationStateChange={applyNavigationState}
-              onProgressChange={setProgress}
-              onTelemetryMessage={handleTelemetryMessage}
-              onTelemetryProtocolError={handleTelemetryProtocolError}
-              ref={browserRef}
-              requestedUrl={requestedUrl}
-            />
-            {agentLoop.isRunning && <AgentOverlay loopState={loopState} />}
-          </View>
-
-          <BottomPanel
-            onStart={(g) => agentLoop.start(g)}
-            onCancel={agentLoop.cancel}
-            isRunning={agentLoop.isRunning}
-            modelReady={hasDownloadedModel}
-            modelName={activeModel?.displayName ?? null}
+        <View style={styles.webviewFrame}>
+          <BrowserWebView
+            onLoadStart={handleBrowserLoadStart}
+            onNavigationError={setNavigationError}
+            onNavigationStateChange={applyNavigationState}
+            onProgressChange={setProgress}
+            onTelemetryMessage={handleTelemetryMessage}
+            onTelemetryProtocolError={handleTelemetryProtocolError}
+            ref={browserRef}
+            requestedUrl={requestedUrl}
           />
+          {agentLoop.isRunning && <AgentOverlay loopState={loopState} />}
         </View>
 
         {showDiagnostics && (
@@ -675,7 +662,15 @@ export function BrowserScreen() {
         </ScrollView>
         )}
       </SafeAreaView>
-    </KeyboardAvoidingView>
+
+      <BottomPanel
+        onStart={(g) => agentLoop.start(g)}
+        onCancel={agentLoop.cancel}
+        isRunning={agentLoop.isRunning}
+        modelReady={hasDownloadedModel}
+        modelName={activeModel?.displayName ?? null}
+      />
+    </View>
   );
 }
 

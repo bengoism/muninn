@@ -1,15 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  Dimensions,
-  FlatList,
-  Keyboard,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import BottomSheet, { BottomSheetFlatList, BottomSheetTextInput } from '@gorhom/bottom-sheet';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useChatStore, type ChatMessage } from '../../../state/chat-store';
@@ -24,13 +15,9 @@ type BottomPanelProps = {
   modelName: string | null;
 };
 
-const COLLAPSED = 120;
-const EXPANDED = Math.round(Dimensions.get('window').height * 0.55);
-
 function humanizeAction(action: string, params: Record<string, unknown>): string {
   const text = params.text as string | undefined;
   const value = params.value as string | undefined;
-
   switch (action) {
     case 'click': return 'Clicked element';
     case 'tap_coordinates': return `Tapped at (${params.x}, ${params.y})`;
@@ -64,19 +51,10 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
     if (message.status === 'started') return null;
     const isError = message.status === 'error' || message.status === 'stopped';
     const isFinished = message.status === 'finished';
-
     return (
       <View style={styles.infoBoxRow}>
-        <View style={[
-          styles.infoBox,
-          isFinished && styles.infoBoxSuccess,
-          isError && styles.infoBoxError,
-        ]}>
-          <Text style={[
-            styles.infoBoxText,
-            isFinished && styles.infoBoxTextSuccess,
-            isError && styles.infoBoxTextError,
-          ]}>
+        <View style={[styles.infoBox, isFinished && styles.infoBoxSuccess, isError && styles.infoBoxError]}>
+          <Text style={[styles.infoBoxText, isFinished && styles.infoBoxTextSuccess, isError && styles.infoBoxTextError]}>
             {message.message}
           </Text>
         </View>
@@ -89,14 +67,11 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
     const humanized = humanizeAction(message.action, message.params);
     const detail = message.urlChanged ? 'Navigated to new page' :
       (!isSuccess && message.reason) ? message.reason.split('.')[0] : null;
-
     return (
       <View style={styles.stepRow}>
         <View style={[styles.stepDot, isSuccess ? styles.stepDotOk : styles.stepDotFail]} />
         <View style={styles.stepContent}>
-          <Text style={[styles.stepLabel, !isSuccess && styles.stepLabelFail]}>
-            {humanized}
-          </Text>
+          <Text style={[styles.stepLabel, !isSuccess && styles.stepLabelFail]}>{humanized}</Text>
           {detail && <Text style={styles.stepDetail}>{detail}</Text>}
         </View>
       </View>
@@ -112,8 +87,7 @@ function ThinkingFooter({ loopState }: { loopState: string }) {
     loopState === 'reasoning' ? 'Thinking...' :
     loopState === 'acting' ? 'Taking action...' :
     loopState === 'validating' ? 'Checking result...' :
-    loopState === 'retrying' ? 'Retrying...' :
-    null;
+    loopState === 'retrying' ? 'Retrying...' : null;
   if (!label) return null;
   return (
     <View style={styles.thinkingRow}>
@@ -124,10 +98,9 @@ function ThinkingFooter({ loopState }: { loopState: string }) {
 }
 
 export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelName }: BottomPanelProps) {
+  const sheetRef = useRef<BottomSheet>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
-  const [isExpanded, setIsExpanded] = useState(false);
-  const anim = useRef(new Animated.Value(COLLAPSED)).current;
-  const listRef = useRef<FlatList>(null);
+  const snapPoints = useMemo(() => [120, '50%', '90%'], []);
 
   const goal = useAgentSessionStore((s) => s.goal);
   const setGoal = useAgentSessionStore((s) => s.setGoal);
@@ -136,41 +109,32 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
 
   const isTerminal = loopState === 'finished' || loopState === 'yielded' || loopState === 'failed';
 
-  const expand = () => {
-    setIsExpanded(true);
-    Animated.spring(anim, { toValue: EXPANDED, useNativeDriver: false, tension: 65, friction: 11 }).start();
-  };
-
-  const collapse = () => {
-    setIsExpanded(false);
-    Keyboard.dismiss();
-    Animated.spring(anim, { toValue: COLLAPSED, useNativeDriver: false, tension: 65, friction: 11 }).start();
-  };
-
   useEffect(() => {
-    if (isRunning && !isExpanded) expand();
+    if (isRunning) sheetRef.current?.snapToIndex(1);
   }, [isRunning]);
 
-  useEffect(() => {
-    if (messages.length > 0 && isExpanded) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 150);
-    }
-  }, [messages.length]);
-
   return (
-    <Animated.View style={[styles.container, { height: anim }]}>
-      {/* Handle */}
-      <Pressable onPress={isExpanded ? collapse : expand} style={styles.handleArea}>
-        <View style={styles.handle} />
-      </Pressable>
-
+    <BottomSheet
+      ref={sheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      backgroundStyle={styles.sheetBg}
+      handleIndicatorStyle={styles.handle}
+      enablePanDownToClose={false}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
+    >
       {/* Goal input */}
       <View style={styles.goalRow}>
-        <TextInput
+        <BottomSheetTextInput
           editable={!isRunning}
           onChangeText={setGoal}
           onSubmitEditing={() => {
-            if (goal.trim() && modelReady && !isRunning) onStart(goal.trim());
+            if (goal.trim() && modelReady && !isRunning) {
+              Keyboard.dismiss();
+              onStart(goal.trim());
+            }
           }}
           placeholder="What should the agent do?"
           placeholderTextColor="#555"
@@ -187,63 +151,52 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
             <Text style={styles.secondaryText}>New</Text>
           </Pressable>
         ) : (
-          <Pressable
-            disabled={!modelReady || !goal.trim()}
-            onPress={() => onStart(goal.trim())}
-            style={[styles.goButton, (!modelReady || !goal.trim()) && styles.disabled]}
-          >
+          <Pressable disabled={!modelReady || !goal.trim()} onPress={() => { Keyboard.dismiss(); onStart(goal.trim()); }} style={[styles.goButton, (!modelReady || !goal.trim()) && styles.disabled]}>
             <Text style={styles.goText}>Go</Text>
           </Pressable>
         )}
       </View>
 
-      {/* Tabs + content (only when expanded) */}
-      {isExpanded && (
-        <View style={styles.expandedContent}>
-          <View style={styles.tabBar}>
-            <Pressable onPress={() => setActiveTab('chat')} style={[styles.tab, activeTab === 'chat' && styles.tabActive]}>
-              <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>CHAT</Text>
-            </Pressable>
-            <Pressable onPress={() => setActiveTab('debug')} style={[styles.tab, activeTab === 'debug' && styles.tabActive]}>
-              <Text style={[styles.tabText, activeTab === 'debug' && styles.tabTextActive]}>DEBUG</Text>
-            </Pressable>
-            <View style={{ flex: 1 }} />
-            {messages.length > 0 && (
-              <Pressable onPress={() => useChatStore.getState().clear()} style={styles.clearBtn}>
-                <Text style={styles.clearText}>Clear</Text>
-              </Pressable>
-            )}
-            {modelName && <Text style={styles.modelLabel}>{modelName}</Text>}
-          </View>
+      {/* Tabs */}
+      <View style={styles.tabBar}>
+        <Pressable onPress={() => setActiveTab('chat')} style={[styles.tab, activeTab === 'chat' && styles.tabActive]}>
+          <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>CHAT</Text>
+        </Pressable>
+        <Pressable onPress={() => setActiveTab('debug')} style={[styles.tab, activeTab === 'debug' && styles.tabActive]}>
+          <Text style={[styles.tabText, activeTab === 'debug' && styles.tabTextActive]}>DEBUG</Text>
+        </Pressable>
+        <View style={{ flex: 1 }} />
+        {messages.length > 0 && (
+          <Pressable onPress={() => useChatStore.getState().clear()} style={styles.clearBtn}>
+            <Text style={styles.clearText}>Clear</Text>
+          </Pressable>
+        )}
+        {modelName && <Text style={styles.modelLabel}>{modelName}</Text>}
+      </View>
 
-          {activeTab === 'chat' ? (
-            messages.length > 0 ? (
-              <FlatList
-                ref={listRef}
-                data={messages}
-                keyExtractor={(_, i) => String(i)}
-                renderItem={({ item }) => <ChatMessageRow message={item} />}
-                style={styles.list}
-                contentContainerStyle={styles.listContent}
-                ListFooterComponent={isRunning ? <ThinkingFooter loopState={loopState} /> : null}
-              />
-            ) : (
-              <View style={styles.empty}><Text style={styles.emptyText}>Agent activity will appear here</Text></View>
-            )
-          ) : (
-            <View style={styles.empty}><Text style={styles.emptyText}>Debug telemetry coming soon</Text></View>
-          )}
-        </View>
+      {/* Content */}
+      {activeTab === 'chat' ? (
+        messages.length > 0 ? (
+          <BottomSheetFlatList
+            data={messages}
+            keyExtractor={(_: ChatMessage, i: number) => String(i)}
+            renderItem={({ item }: { item: ChatMessage }) => <ChatMessageRow message={item} />}
+            contentContainerStyle={styles.listContent}
+            ListFooterComponent={isRunning ? <ThinkingFooter loopState={loopState} /> : null}
+          />
+        ) : (
+          <View style={styles.empty}><Text style={styles.emptyText}>Agent activity will appear here</Text></View>
+        )
+      ) : (
+        <View style={styles.empty}><Text style={styles.emptyText}>Debug telemetry coming soon</Text></View>
       )}
-    </Animated.View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#222', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#333', overflow: 'hidden' },
-  handleArea: { alignItems: 'center', paddingVertical: 8 },
-  handle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#444' },
-  // Goal
+  sheetBg: { backgroundColor: '#222' },
+  handle: { backgroundColor: '#444', width: 32, height: 3 },
   goalRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
   goalInput: { flex: 1, backgroundColor: '#2a2a2a', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: '#333', color: '#ededed', fontSize: 14, height: 38, paddingHorizontal: 12 },
   goalInputRunning: { borderColor: '#444', opacity: 0.6 },
@@ -254,8 +207,6 @@ const styles = StyleSheet.create({
   secondaryButton: { backgroundColor: '#333', borderRadius: 8, height: 38, justifyContent: 'center', paddingHorizontal: 18 },
   secondaryText: { color: '#ededed', fontSize: 14, fontWeight: '600' },
   disabled: { opacity: 0.3 },
-  // Expanded
-  expandedContent: { flex: 1 },
   tabBar: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#333' },
   tab: { paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: '#ededed' },
@@ -264,14 +215,10 @@ const styles = StyleSheet.create({
   clearBtn: { paddingHorizontal: 8, paddingVertical: 4, alignSelf: 'center' },
   clearText: { color: '#555', fontSize: 11, fontWeight: '500' },
   modelLabel: { color: '#555', fontSize: 11, fontWeight: '500', alignSelf: 'center', paddingRight: 4 },
-  // List
-  list: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingVertical: 12, gap: 10 },
-  // User
   userRow: { alignItems: 'flex-end' },
   userBubble: { backgroundColor: '#2a2a2a', borderRadius: 12, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 10, maxWidth: '85%' },
   userText: { color: '#ededed', fontSize: 14, lineHeight: 20 },
-  // Steps
   stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   stepDot: { width: 6, height: 6, borderRadius: 3, marginTop: 6 },
   stepDotOk: { backgroundColor: '#555' },
@@ -280,7 +227,6 @@ const styles = StyleSheet.create({
   stepLabel: { color: '#aaa', fontSize: 13, lineHeight: 18 },
   stepLabelFail: { color: '#ff4747' },
   stepDetail: { color: '#555', fontSize: 12, lineHeight: 16 },
-  // Info boxes
   infoBoxRow: { paddingVertical: 2 },
   infoBox: { borderRadius: 8, borderWidth: 1, borderColor: '#333', backgroundColor: 'rgba(255,255,255,0.03)', paddingHorizontal: 14, paddingVertical: 10 },
   infoBoxSuccess: { borderColor: 'rgba(0,212,126,0.3)', backgroundColor: 'rgba(0,212,126,0.06)' },
@@ -288,11 +234,9 @@ const styles = StyleSheet.create({
   infoBoxText: { color: '#888', fontSize: 13, lineHeight: 18 },
   infoBoxTextSuccess: { color: '#00d47e' },
   infoBoxTextError: { color: '#ff4747' },
-  // Thinking
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   thinkingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#555', opacity: 0.6 },
   thinkingText: { color: '#555', fontSize: 13, fontStyle: 'italic' },
-  // Empty
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 24 },
   emptyText: { color: '#555', fontSize: 13 },
 });
