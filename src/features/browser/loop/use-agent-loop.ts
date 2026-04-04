@@ -134,6 +134,7 @@ export function useAgentLoop(
             goal,
             screenshotUri: observation.screenshot.uri,
             axSnapshot: observation.axSnapshot,
+            axTreeText: observation.axTreeText,
             actionHistory: store.getState().actionHistory,
             runtimeMode,
           });

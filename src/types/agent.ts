@@ -67,6 +67,7 @@ export type InferenceRequest = {
   goal: string;
   screenshotUri: string;
   axSnapshot: AxNode[];
+  axTreeText: string;
   actionHistory: AgentActionRecord[];
   runtimeMode: RuntimeMode;
 };
@@ -170,6 +171,7 @@ export type ObservationFrameSnapshot = {
 export type ObservationResult = {
   screenshot: ViewportCapture;
   axSnapshot: AxNode[];
+  axTreeText: string;
   frameSnapshots: ObservationFrameSnapshot[];
   warnings: string[];
   quiescence: ObservationQuiescence;

@@ -4,7 +4,7 @@ final class AgentRuntimePromptBuilder {
 
   private static let actionSchema = """
     Available actions:
-    - click(id: string) — click an element by its accessibility ID
+    - click(id: string) — click an element by its ref ID
     - tap_coordinates(x: number, y: number) — tap at screen coordinates
     - type(id: string, text: string) — type text into an input element
     - scroll(direction: "up"|"down"|"left"|"right", amount: "page"|"half"|"small")
@@ -12,6 +12,8 @@ final class AgentRuntimePromptBuilder {
     - wait(condition: string) — wait for a condition
     - yield_to_user(reason: string) — ask the user for help
     - finish(status: "success"|"failure", message: string) — task complete
+
+    Elements with [ref=...] are interactive. Use the ref value as the "id" parameter for click and type actions.
     """
 
   func buildPrompt(
@@ -29,9 +31,11 @@ final class AgentRuntimePromptBuilder {
     parts.append("Viewport: \(screenshot.pixelWidth)x\(screenshot.pixelHeight)")
     parts.append("")
 
-    let axSummary = buildAXSummary(request.axSnapshot)
+    let axSummary = request.axTreeText.isEmpty
+      ? buildAXSummary(request.axSnapshot)
+      : request.axTreeText
     if !axSummary.isEmpty {
-      parts.append("Accessibility tree (visible elements):")
+      parts.append("Page content and interactive elements:")
       parts.append(axSummary)
       parts.append("")
     }

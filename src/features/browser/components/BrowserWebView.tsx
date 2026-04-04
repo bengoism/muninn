@@ -598,10 +598,6 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         observe: async (options) => {
           const quiescence = await waitForQuiescence(options);
 
-          if (!quiescence.satisfied) {
-            throw new Error('Timed out waiting for page quiescence.');
-          }
-
           const screenshot = await captureViewport();
           const snapshotResult = await requestObservationSnapshots(
             options?.snapshotTimeoutMs ?? 1600
@@ -614,6 +610,12 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
             timedOut: snapshotResult.timedOut,
           });
 
+          if (!quiescence.satisfied) {
+            stitched.warnings.unshift(
+              'Page quiescence timed out; snapshot may reflect a loading state.'
+            );
+          }
+
           if (snapshotResult.timedOut) {
             stitched.warnings.unshift(
               'Timed out waiting for one or more frame snapshot responses.'
@@ -622,6 +624,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
 
           return {
             axSnapshot: stitched.axSnapshot,
+            axTreeText: stitched.axTreeText,
             frameSnapshots: stitched.frameSnapshots,
             observedAt: new Date().toISOString(),
             quiescence,

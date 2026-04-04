@@ -549,18 +549,177 @@ export function buildBridgeBootstrapScript() {
     }
   }
 
+  var LANDMARK_TAGS = {
+    NAV: 'navigation', MAIN: 'main', HEADER: 'header', FOOTER: 'footer',
+    ASIDE: 'complementary', SECTION: 'region', ARTICLE: 'article',
+    FORM: 'form', DIALOG: 'dialog',
+  };
+
+  var HEADING_TAGS = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+
+  var SKIP_TAGS = new Set([
+    'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'PATH', 'CIRCLE',
+    'RECT', 'LINE', 'POLYGON', 'POLYLINE', 'ELLIPSE', 'G', 'DEFS', 'USE',
+    'CLIPPATH', 'MASK', 'SYMBOL', 'LINEARGRADIENT', 'RADIALGRADIENT',
+  ]);
+
+  var TREE_MAX_CHARS = 4000;
+  var TREE_TEXT_MAX_CHARS = 120;
+
+  function isTreeNodeHidden(element) {
+    if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
+      return true;
+    }
+
+    var style = getComputedStyleSafe(element);
+
+    if (style && (style.display === 'none' || style.visibility === 'hidden')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function buildAxTree() {
+    var lines = [];
+    var charCount = 0;
+    var truncated = false;
+
+    function emit(depth, line) {
+      if (truncated) return;
+      var indented = '';
+      for (var i = 0; i < depth; i++) indented += '  ';
+      indented += '- ' + line;
+      charCount += indented.length + 1;
+      if (charCount > TREE_MAX_CHARS) {
+        truncated = true;
+        lines.push(indented.substring(0, indented.length - (charCount - TREE_MAX_CHARS)));
+        lines.push('... (truncated)');
+        return;
+      }
+      lines.push(indented);
+    }
+
+    function walkText(node, depth) {
+      if (truncated) return;
+      var text = node.nodeValue;
+      if (!text) return;
+      text = text.replace(/\\s+/g, ' ').trim();
+      if (text.length === 0) return;
+      if (text.length > TREE_TEXT_MAX_CHARS) {
+        text = text.substring(0, TREE_TEXT_MAX_CHARS) + '...';
+      }
+      emit(depth, 'text "' + text + '"');
+    }
+
+    function walk(node, depth) {
+      if (truncated) return;
+      if (!node) return;
+
+      if (node.nodeType === 3) {
+        walkText(node, depth);
+        return;
+      }
+
+      if (node.nodeType !== 1) return;
+
+      var element = node;
+      var tagName = element.tagName;
+
+      if (SKIP_TAGS.has(tagName)) return;
+      if (isTreeNodeHidden(element)) return;
+
+      var isInteractive = element.matches(INTERACTIVE_SELECTOR);
+      var landmarkRole = LANDMARK_TAGS[tagName] || null;
+      var headingLevel = HEADING_TAGS[tagName] || 0;
+      var isListContainer = tagName === 'UL' || tagName === 'OL';
+      var isListItem = tagName === 'LI';
+      var isStructural = landmarkRole || headingLevel || isListContainer || isListItem;
+
+      if (isInteractive) {
+        var role = getElementRole(element);
+        var label = getElementLabel(element);
+        var value = getElementValue(element);
+        var placeholder = getElementPlaceholder(element);
+        var id = ensureNodeId(element);
+
+        var desc = role;
+        if (label) desc += ' "' + label + '"';
+        desc += ' [ref=' + id + ']';
+        if (headingLevel) desc += ' [level=' + headingLevel + ']';
+        if (value !== null && value !== label) desc += ': "' + (value.length > 80 ? value.substring(0, 80) + '...' : value) + '"';
+        if (placeholder) desc += ' (placeholder: "' + placeholder + '")';
+
+        if (element.type === 'checkbox' || element.type === 'radio') {
+          desc += element.checked ? ' [checked]' : '';
+        }
+        if (element.disabled) desc += ' [disabled]';
+
+        emit(depth, desc);
+        return;
+      }
+
+      if (headingLevel) {
+        var headingText = normalizeString(
+          typeof element.innerText === 'string' ? element.innerText : element.textContent || ''
+        );
+        if (headingText) {
+          if (headingText.length > TREE_TEXT_MAX_CHARS) {
+            headingText = headingText.substring(0, TREE_TEXT_MAX_CHARS) + '...';
+          }
+          emit(depth, 'heading "' + headingText + '" [level=' + headingLevel + ']');
+        }
+        return;
+      }
+
+      var emitContainer = false;
+      if (landmarkRole) {
+        var regionLabel = normalizeString(element.getAttribute('aria-label'));
+        emit(depth, landmarkRole + (regionLabel ? ' "' + regionLabel + '"' : ''));
+        emitContainer = true;
+      } else if (isListContainer) {
+        emit(depth, tagName === 'OL' ? 'list (ordered)' : 'list');
+        emitContainer = true;
+      } else if (isListItem) {
+        emit(depth, 'listitem');
+        emitContainer = true;
+      }
+
+      var childDepth = emitContainer ? depth + 1 : depth;
+      var children = element.childNodes;
+      for (var i = 0; i < children.length; i++) {
+        walk(children[i], childDepth);
+      }
+
+      if (element.shadowRoot && element.shadowRoot.mode === 'open') {
+        var shadowChildren = element.shadowRoot.childNodes;
+        for (var j = 0; j < shadowChildren.length; j++) {
+          walk(shadowChildren[j], childDepth);
+        }
+      }
+    }
+
+    walk(document.body, 0);
+    return lines.join('\\n');
+  }
+
   function collectAxSnapshotPayload() {
-    const nodes = [];
-    const seen = new Set();
+    var nodes = [];
+    var seen = new Set();
     collectInteractiveElements(document.documentElement, nodes, seen);
-    return nodes.map(serializeNode);
+    return {
+      nodes: nodes.map(serializeNode),
+      treeText: buildAxTree(),
+    };
   }
 
   function sendAxSnapshot(requestId) {
     try {
+      var payload = collectAxSnapshotPayload();
       post('ax_snapshot', {
         requestId: requestId,
-        nodes: collectAxSnapshotPayload(),
+        nodes: payload.nodes,
+        treeText: payload.treeText,
         observedAt: nowIso(),
       });
     } catch (error) {

@@ -24,6 +24,7 @@ struct AgentRuntimeRequest {
   let screenshotUri: String
   let screenshotUrl: URL
   let axSnapshot: [[String: Any]]
+  let axTreeText: String
   let actionHistory: [[String: Any]]
   let runtimeMode: RuntimeMode
 
@@ -72,6 +73,7 @@ struct AgentRuntimeRequest {
     self.screenshotUri = screenshotUri
     self.screenshotUrl = screenshotUrl
     self.axSnapshot = dictionary["axSnapshot"] as? [[String: Any]] ?? []
+    self.axTreeText = dictionary["axTreeText"] as? String ?? ""
     self.actionHistory = dictionary["actionHistory"] as? [[String: Any]] ?? []
     self.runtimeMode = runtimeMode
   }

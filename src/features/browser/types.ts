@@ -92,6 +92,7 @@ export type BrowserAxSnapshotNodePayload = {
 export type BrowserAxSnapshotPayload = {
   requestId: string;
   nodes: BrowserAxSnapshotNodePayload[];
+  treeText: string;
   observedAt: string;
 };
 
