@@ -18,6 +18,11 @@ type FallbackEntry = {
  * a no_op outcome. A null return from deriveParams means the fallback cannot
  * be computed (e.g. missing bounds) and is skipped.
  */
+const AMOUNT_REDUCTION: Record<string, string> = {
+  page: 'half',
+  half: 'small',
+};
+
 const FALLBACK_CHAINS: Partial<Record<ToolName, FallbackEntry[]>> = {
   click: [
     {
@@ -39,11 +44,26 @@ const FALLBACK_CHAINS: Partial<Record<ToolName, FallbackEntry[]>> = {
   ],
   type: [
     {
-      // Retry the same action once — the injected JS already has an internal
-      // keyboard-event fallback path that may succeed on a second attempt
-      // after focus has settled.
       action: 'type',
       deriveParams: (original) => ({ ...original }),
+    },
+  ],
+  fill: [
+    {
+      action: 'fill',
+      deriveParams: (original) => ({ ...original }),
+    },
+  ],
+  scroll: [
+    {
+      // Retry with reduced scroll amount: page→half, half→small.
+      action: 'scroll',
+      deriveParams: (original) => {
+        const amount = typeof original.amount === 'string' ? original.amount : 'half';
+        const reduced = AMOUNT_REDUCTION[amount];
+        if (!reduced) return null;
+        return { ...original, amount: reduced };
+      },
     },
   ],
 };

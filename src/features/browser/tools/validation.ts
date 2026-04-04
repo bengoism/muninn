@@ -198,8 +198,14 @@ export function classifyOutcome(
       return classifyScroll(signals, params);
     case 'go_back':
       return classifyGoBack(signals);
+    case 'hover':
+    case 'focus':
+      if (signals.focusChanged || signals.axDelta.total > 0) {
+        return { outcome: 'success', signals, reason: null };
+      }
+      return { outcome: 'no_op', signals, reason: 'Hover/focus had no observable effect.' };
     case 'gettext':
-      // Read-only — always success if executor succeeded.
+    case 'eval':
       return { outcome: 'success', signals, reason: null };
     default:
       // wait, finish, yield_to_user — always success from executor.

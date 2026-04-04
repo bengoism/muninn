@@ -52,6 +52,30 @@ export const TOOL_REGISTRY: Record<ToolName, ToolDefinition> = {
     terminal: false,
     requiresBrowser: true,
   },
+  hover: {
+    name: 'hover',
+    params: {
+      id: { type: 'string', required: true },
+    },
+    terminal: false,
+    requiresBrowser: true,
+  },
+  focus: {
+    name: 'focus',
+    params: {
+      id: { type: 'string', required: true },
+    },
+    terminal: false,
+    requiresBrowser: true,
+  },
+  eval: {
+    name: 'eval',
+    params: {
+      code: { type: 'string', required: true },
+    },
+    terminal: false,
+    requiresBrowser: true,
+  },
   scroll: {
     name: 'scroll',
     params: {

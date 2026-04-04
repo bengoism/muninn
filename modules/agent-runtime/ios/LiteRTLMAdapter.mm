@@ -588,6 +588,18 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"id": @{ @"type": @"string", @"description": @"Element ref ID" } },
           @"required": @[ @"id" ] } } },
+      @{ @"function": @{ @"name": @"hover", @"description": @"Hover over an element to trigger menus or tooltips",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" } },
+          @"required": @[ @"id" ] } } },
+      @{ @"function": @{ @"name": @"focus", @"description": @"Focus an element",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" } },
+          @"required": @[ @"id" ] } } },
+      @{ @"function": @{ @"name": @"eval", @"description": @"Run JavaScript in the page and return the result",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"code": @{ @"type": @"string", @"description": @"JavaScript code to execute" } },
+          @"required": @[ @"code" ] } } },
       @{ @"function": @{ @"name": @"scroll", @"description": @"Scroll the page",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"direction": @{ @"type": @"string", @"description": @"up, down, left, or right" },

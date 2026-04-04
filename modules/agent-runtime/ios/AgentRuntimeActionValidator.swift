@@ -8,6 +8,9 @@ final class AgentRuntimeActionValidator {
     "fill",
     "select",
     "gettext",
+    "hover",
+    "focus",
+    "eval",
     "scroll",
     "go_back",
     "wait",
@@ -44,6 +47,12 @@ final class AgentRuntimeActionValidator {
       try requireString(named: "value", in: candidate)
     case "gettext":
       try requireString(named: "id", in: candidate)
+    case "hover":
+      try requireString(named: "id", in: candidate)
+    case "focus":
+      try requireString(named: "id", in: candidate)
+    case "eval":
+      try requireString(named: "code", in: candidate)
     case "scroll":
       try requireString(named: "direction", in: candidate)
       try requireString(named: "amount", in: candidate)

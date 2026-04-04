@@ -85,6 +85,22 @@ export async function executeTool(
     case 'gettext':
       jsCall = `window.__MUNINN_ACTIONS__.gettext("${escapeJS(String(params.id))}")`;
       break;
+    case 'hover':
+      jsCall = `window.__MUNINN_ACTIONS__.hover("${escapeJS(String(params.id))}")`;
+      break;
+    case 'focus':
+      jsCall = `window.__MUNINN_ACTIONS__.focus("${escapeJS(String(params.id))}")`;
+      break;
+    case 'eval': {
+      // Direct JS evaluation — no injection needed.
+      const evalResult = await browser.evaluateJavaScript<unknown>(String(params.code));
+      return {
+        ok: evalResult.ok,
+        action,
+        reason: evalResult.ok ? String(evalResult.value ?? 'undefined') : (evalResult.message ?? 'eval failed'),
+        durationMs: Date.now() - startedAt,
+      };
+    }
     case 'wait':
       jsCall = `window.__MUNINN_ACTIONS__.waitForCondition("${escapeJS(String(params.condition ?? 'idle'))}", ${Number(params.timeout ?? 3000)})`;
       break;
@@ -112,10 +128,32 @@ export async function executeTool(
   }
 
   const actionResult = result.value;
+  const rawReason = actionResult?.reason ?? null;
   return {
     ok: actionResult?.ok ?? false,
     action,
-    reason: actionResult?.reason ?? null,
+    reason: actionResult?.ok ? rawReason : formatError(action, params, rawReason),
     durationMs: Date.now() - startedAt,
   };
+}
+
+function formatError(
+  action: ToolName,
+  params: Record<string, unknown>,
+  rawError: string | null,
+): string {
+  const msg = rawError ?? 'Unknown error';
+  if (msg.includes('Element not found')) {
+    return `${msg}. The element may have been removed or the page changed. Try re-observing.`;
+  }
+  if (msg.includes('not a <select>')) {
+    return `${msg}. Use click instead for custom dropdowns.`;
+  }
+  if (msg.includes('No element at')) {
+    return `${msg}. Try clicking by ref ID instead of coordinates.`;
+  }
+  if (msg.includes('No matching option')) {
+    return `${msg}. Check the available options and try a different value.`;
+  }
+  return msg;
 }

@@ -174,6 +174,28 @@ export const ACTIONS_INJECTION_SCRIPT = `
       });
     },
 
+    hover: function(elementId) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      var rect = el.getBoundingClientRect();
+      var cx = rect.left + rect.width / 2;
+      var cy = rect.top + rect.height / 2;
+      var opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+      el.dispatchEvent(new MouseEvent('mouseenter', opts));
+      el.dispatchEvent(new MouseEvent('mouseover', opts));
+      el.dispatchEvent(new MouseEvent('mousemove', opts));
+      return { ok: true, reason: null };
+    },
+
+    focus: function(elementId) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      el.focus();
+      return { ok: true, reason: null };
+    },
+
     gettext: function(elementId) {
       var el = findById(elementId);
       if (!el) return { ok: false, reason: 'Element not found: ' + elementId };

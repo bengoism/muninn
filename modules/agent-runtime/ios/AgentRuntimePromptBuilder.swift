@@ -10,6 +10,9 @@ final class AgentRuntimePromptBuilder {
     - fill(id: string, text: string) — clear input and set new text
     - select(id: string, value: string) — pick a dropdown option by value or text
     - gettext(id: string) — read text content of an element (returns text in reason field)
+    - hover(id: string) — hover over an element to trigger menus or tooltips
+    - focus(id: string) — focus an element
+    - eval(code: string) — run JavaScript in the page and return the result
     - scroll(direction: "up"|"down"|"left"|"right", amount: "page"|"half"|"small")
     - go_back() — navigate back
     - wait(condition: string) — wait for condition: "idle", "url:<pattern>", "selector:<css>", "text:<substring>"

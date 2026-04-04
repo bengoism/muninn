@@ -169,14 +169,29 @@ describe('getRetryDirective — type', () => {
 });
 
 // ---------------------------------------------------------------------------
-// scroll — no fallback
+// scroll — retry with reduced amount
 // ---------------------------------------------------------------------------
 
 describe('getRetryDirective — scroll', () => {
-  it('returns no retry even on no_op', () => {
+  it('retries with reduced amount on no_op (page→half)', () => {
     const directive = getRetryDirective(
       'scroll',
       { direction: 'down', amount: 'page' },
+      makeValidation(),
+      0,
+      makeSnapshot(),
+    );
+    expect(directive.retry).toBe(true);
+    if (directive.retry) {
+      expect(directive.fallbackAction).toBe('scroll');
+      expect(directive.fallbackParams.amount).toBe('half');
+    }
+  });
+
+  it('returns no retry when amount is already small', () => {
+    const directive = getRetryDirective(
+      'scroll',
+      { direction: 'down', amount: 'small' },
       makeValidation(),
       0,
       makeSnapshot(),
