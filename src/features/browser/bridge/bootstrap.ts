@@ -459,7 +459,7 @@ export function buildBridgeBootstrapScript() {
 
       seen.add(child);
 
-      if (isInteractiveElement(child)) {
+      if (isInteractiveElement(child) || isCursorInteractive(child)) {
         bucket.push(child);
       }
 
@@ -563,8 +563,34 @@ export function buildBridgeBootstrapScript() {
     'CLIPPATH', 'MASK', 'SYMBOL', 'LINEARGRADIENT', 'RADIALGRADIENT',
   ]);
 
+  var NATIVE_INTERACTIVE_TAGS = new Set([
+    'A', 'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'SUMMARY',
+  ]);
+
   var TREE_MAX_CHARS = 4000;
   var TREE_TEXT_MAX_CHARS = 120;
+
+  function isCursorInteractive(element) {
+    if (NATIVE_INTERACTIVE_TAGS.has(element.tagName)) return false;
+    if (element.matches(INTERACTIVE_SELECTOR)) return false;
+    if (element.getAttribute('onclick')) return true;
+    var tabIdx = element.getAttribute('tabindex');
+    if (tabIdx !== null && tabIdx !== '-1') return true;
+    var style = getComputedStyleSafe(element);
+    if (style && style.cursor === 'pointer') {
+      // Avoid false positives: only if the element itself sets pointer,
+      // not inherited from a parent that's already interactive.
+      var parent = element.parentElement;
+      if (parent) {
+        var parentStyle = getComputedStyleSafe(parent);
+        if (parentStyle && parentStyle.cursor === 'pointer' && parent.matches(INTERACTIVE_SELECTOR)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
 
   function isTreeNodeHidden(element) {
     if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
@@ -636,16 +662,19 @@ export function buildBridgeBootstrapScript() {
       var isListItem = tagName === 'LI';
       var isStructural = landmarkRole || headingLevel || isListContainer || isListItem;
 
-      if (isInteractive) {
-        var role = getElementRole(element);
+      var isCursorClickable = !isInteractive && isCursorInteractive(element);
+
+      if (isInteractive || isCursorClickable) {
+        var role = isInteractive ? getElementRole(element) : 'generic';
         var label = getElementLabel(element);
-        var value = getElementValue(element);
-        var placeholder = getElementPlaceholder(element);
+        var value = isInteractive ? getElementValue(element) : null;
+        var placeholder = isInteractive ? getElementPlaceholder(element) : null;
         var id = ensureNodeId(element);
 
         var desc = role;
         if (label) desc += ' "' + label + '"';
         desc += ' [ref=' + id + ']';
+        if (isCursorClickable) desc += ' clickable';
         if (headingLevel) desc += ' [level=' + headingLevel + ']';
         if (value !== null && value !== label) desc += ': "' + (value.length > 80 ? value.substring(0, 80) + '...' : value) + '"';
         if (placeholder) desc += ' (placeholder: "' + placeholder + '")';
