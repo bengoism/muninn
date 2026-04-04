@@ -663,13 +663,15 @@ export function BrowserScreen() {
         )}
       </SafeAreaView>
 
-      <BottomPanel
-        onStart={(g) => agentLoop.start(g)}
-        onCancel={agentLoop.cancel}
-        isRunning={agentLoop.isRunning}
-        modelReady={hasDownloadedModel}
-        modelName={activeModel?.displayName ?? null}
-      />
+      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 10 }} pointerEvents="box-none">
+        <BottomPanel
+          onStart={(g) => agentLoop.start(g)}
+          onCancel={agentLoop.cancel}
+          isRunning={agentLoop.isRunning}
+          modelReady={hasDownloadedModel}
+          modelName={activeModel?.displayName ?? null}
+        />
+      </View>
     </View>
   );
 }
