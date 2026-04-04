@@ -106,7 +106,7 @@ export function GoalBar({
         ) : (
           <Pressable
             disabled={!modelReady || !goal.trim()}
-            onPress={() => onStart(goal)}
+            onPress={() => onStart(goal.trim())}
             style={[
               styles.startButton,
               (!modelReady || !goal.trim()) && styles.buttonDisabled,
