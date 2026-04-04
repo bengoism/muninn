@@ -94,6 +94,7 @@ export const ACTIONS_INJECTION_SCRIPT = `
     captureValidationState: function() {
       var ids = [];
       var bounds = {};
+      var roles = {};
       var els = document.querySelectorAll('[data-ai-internal-id]');
       for (var i = 0; i < els.length; i++) {
         var el = els[i];
@@ -102,13 +103,32 @@ export const ACTIONS_INJECTION_SCRIPT = `
         ids.push(id);
         var rect = el.getBoundingClientRect();
         bounds[id] = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+        var role = el.getAttribute('role') || '';
+        if (role) roles[id] = role;
       }
       var focused = document.activeElement;
+
+      // Detect visible dialog/modal elements in the DOM.
+      var hasDialog = false;
+      var dialogEls = document.querySelectorAll(
+        'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+      );
+      for (var d = 0; d < dialogEls.length; d++) {
+        var de = dialogEls[d];
+        var dr = de.getBoundingClientRect();
+        if (dr.width > 0 && dr.height > 0) {
+          hasDialog = true;
+          break;
+        }
+      }
+
       return {
         scrollY: window.scrollY,
         axNodeIds: ids,
         axNodeBounds: bounds,
-        focusedElementId: focused ? focused.getAttribute('data-ai-internal-id') : null
+        axNodeRoles: roles,
+        focusedElementId: focused ? focused.getAttribute('data-ai-internal-id') : null,
+        hasDialog: hasDialog
       };
     }
   };
