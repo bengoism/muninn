@@ -8,7 +8,7 @@ import type {
   StopReason,
 } from '../types/agent';
 
-const MAX_ACTION_HISTORY = 5;
+const MAX_ACTION_HISTORY = 10;
 
 type AgentSessionState = {
   goal: string;

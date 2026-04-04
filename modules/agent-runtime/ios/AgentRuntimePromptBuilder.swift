@@ -82,8 +82,19 @@ final class AgentRuntimePromptBuilder {
   }
 
   private func buildActionHistory(_ history: [[String: Any]]) -> String {
-    let recent = history.suffix(3)
-    let lines: [String] = recent.compactMap { entry in
+    let total = history.count
+    var lines: [String] = []
+
+    // Summary line when there's more history than shown.
+    if total > 5 {
+      let succeeded = history.filter { ($0["status"] as? String) == "succeeded" }.count
+      let failed = total - succeeded
+      lines.append("  (session: \(total) actions, \(succeeded) succeeded, \(failed) failed)")
+    }
+
+    // Show last 5 in detail.
+    let recent = history.suffix(5)
+    for entry in recent {
       let action = entry["action"] as? String ?? "unknown"
       let status = entry["status"] as? String ?? ""
       let params = entry["parameters"] as? [String: Any] ?? [:]
@@ -96,10 +107,10 @@ final class AgentRuntimePromptBuilder {
       var line = "  - \(action)\(paramSummary) → \(status)"
 
       if let before = urlBefore, let after = urlAfter, before != after {
-        line += " (page navigated from \(before) to \(after))"
+        line += " (navigated to \(after))"
       }
 
-      return line
+      lines.append(line)
     }
     return lines.joined(separator: "\n")
   }
