@@ -151,32 +151,30 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
   };
 
   const dragStart = useRef(SNAP_COLLAPSED);
+
+  const onHandleMove = (_: any, g: any) => {
+    const newH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, dragStart.current - g.dy));
+    heightAnim.setValue(newH);
+  };
+
+  const onHandleRelease = (_: any, g: any) => {
+    const finalH = dragStart.current - g.dy;
+    const projected = finalH - g.vy * 200;
+    const target = snapTo(projected);
+    currentHeight.current = target;
+    dragStart.current = target;
+    Animated.timing(heightAnim, { toValue: target, duration: 180, useNativeDriver: false }).start();
+    if (target === SNAP_COLLAPSED) Keyboard.dismiss();
+  };
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
-      onPanResponderGrant: () => {
-        heightAnim.stopAnimation((v) => {
-          currentHeight.current = v;
-          dragStart.current = v;
-        });
-      },
-      onPanResponderMove: (_, g) => {
-        const newH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, dragStart.current - g.dy));
-        heightAnim.setValue(newH);
-      },
-      onPanResponderRelease: (_, g) => {
-        const finalH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, dragStart.current - g.dy));
-        const projected = finalH - g.vy * 200;
-        const target = snapTo(projected);
-        currentHeight.current = target;
-        Animated.timing(heightAnim, {
-          toValue: target,
-          duration: 200,
-          useNativeDriver: false,
-        }).start();
-        if (target === SNAP_COLLAPSED) Keyboard.dismiss();
-      },
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => { dragStart.current = currentHeight.current; },
+      onPanResponderMove: onHandleMove,
+      onPanResponderRelease: onHandleRelease,
+      onPanResponderTerminate: onHandleRelease,
     })
   ).current;
 
