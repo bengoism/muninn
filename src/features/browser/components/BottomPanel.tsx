@@ -176,6 +176,11 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
           </Text>
         </Pressable>
         <View style={{ flex: 1 }} />
+        {messages.length > 0 && (
+          <Pressable onPress={() => useChatStore.getState().clear()} style={styles.clearButton}>
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </Pressable>
+        )}
         {modelName && (
           <Text style={styles.modelLabel}>{modelName}</Text>
         )}
@@ -298,6 +303,16 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: '#ededed',
+  },
+  clearButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'center',
+  },
+  clearButtonText: {
+    color: '#555',
+    fontSize: 11,
+    fontWeight: '500',
   },
   modelLabel: {
     color: '#555',
