@@ -1,6 +1,16 @@
-import BottomSheet, { BottomSheetFlatList, BottomSheetTextInput } from '@gorhom/bottom-sheet';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  Dimensions,
+  FlatList,
+  Keyboard,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useChatStore, type ChatMessage } from '../../../state/chat-store';
@@ -14,6 +24,25 @@ type BottomPanelProps = {
   modelReady: boolean;
   modelName: string | null;
 };
+
+const SCREEN_H = Dimensions.get('window').height;
+const SNAP_COLLAPSED = 120;
+const SNAP_HALF = Math.round(SCREEN_H * 0.5);
+const SNAP_FULL = Math.round(SCREEN_H * 0.85);
+const SNAPS = [SNAP_COLLAPSED, SNAP_HALF, SNAP_FULL];
+
+function snapTo(value: number): number {
+  let closest = SNAPS[0];
+  let minDist = Math.abs(value - closest);
+  for (const snap of SNAPS) {
+    const dist = Math.abs(value - snap);
+    if (dist < minDist) {
+      closest = snap;
+      minDist = dist;
+    }
+  }
+  return closest;
+}
 
 function humanizeAction(action: string, params: Record<string, unknown>): string {
   const text = params.text as string | undefined;
@@ -98,9 +127,10 @@ function ThinkingFooter({ loopState }: { loopState: string }) {
 }
 
 export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelName }: BottomPanelProps) {
-  const sheetRef = useRef<BottomSheet>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
-  const snapPoints = useMemo(() => [120, '50%', '90%'], []);
+  const heightAnim = useRef(new Animated.Value(SNAP_COLLAPSED)).current;
+  const currentHeight = useRef(SNAP_COLLAPSED);
+  const listRef = useRef<FlatList>(null);
 
   const goal = useAgentSessionStore((s) => s.goal);
   const setGoal = useAgentSessionStore((s) => s.setGoal);
@@ -108,28 +138,60 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
   const messages = useChatStore((s) => s.messages);
 
   const isTerminal = loopState === 'finished' || loopState === 'yielded' || loopState === 'failed';
+  const isExpanded = currentHeight.current > SNAP_COLLAPSED;
+
+  const animateTo = (target: number) => {
+    currentHeight.current = target;
+    Animated.spring(heightAnim, {
+      toValue: target,
+      useNativeDriver: false,
+      tension: 65,
+      friction: 11,
+    }).start();
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
+      onPanResponderMove: (_, g) => {
+        const newH = Math.max(SNAP_COLLAPSED, Math.min(SNAP_FULL, currentHeight.current - g.dy));
+        heightAnim.setValue(newH);
+      },
+      onPanResponderRelease: (_, g) => {
+        const projected = currentHeight.current - g.dy;
+        const target = snapTo(projected);
+        animateTo(target);
+        if (target === SNAP_COLLAPSED) Keyboard.dismiss();
+      },
+    })
+  ).current;
 
   useEffect(() => {
-    if (isRunning) sheetRef.current?.snapToIndex(1);
+    if (isRunning && currentHeight.current === SNAP_COLLAPSED) {
+      animateTo(SNAP_HALF);
+    }
   }, [isRunning]);
 
+  useEffect(() => {
+    if (messages.length > 0 && currentHeight.current > SNAP_COLLAPSED) {
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 150);
+    }
+  }, [messages.length]);
+
   return (
-    <BottomSheet
-      ref={sheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      backgroundStyle={styles.sheetBg}
-      handleIndicatorStyle={styles.handle}
-      enablePanDownToClose={false}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
-    >
+    <Animated.View style={[styles.container, { height: heightAnim }]}>
+      {/* Drag handle */}
+      <View {...panResponder.panHandlers} style={styles.handleArea}>
+        <View style={styles.handle} />
+      </View>
+
       {/* Goal input */}
       <View style={styles.goalRow}>
-        <BottomSheetTextInput
+        <TextInput
           editable={!isRunning}
           onChangeText={setGoal}
+          onFocus={() => { if (currentHeight.current === SNAP_COLLAPSED) animateTo(SNAP_HALF); }}
           onSubmitEditing={() => {
             if (goal.trim() && modelReady && !isRunning) {
               Keyboard.dismiss();
@@ -151,7 +213,11 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
             <Text style={styles.secondaryText}>New</Text>
           </Pressable>
         ) : (
-          <Pressable disabled={!modelReady || !goal.trim()} onPress={() => { Keyboard.dismiss(); onStart(goal.trim()); }} style={[styles.goButton, (!modelReady || !goal.trim()) && styles.disabled]}>
+          <Pressable
+            disabled={!modelReady || !goal.trim()}
+            onPress={() => { Keyboard.dismiss(); onStart(goal.trim()); }}
+            style={[styles.goButton, (!modelReady || !goal.trim()) && styles.disabled]}
+          >
             <Text style={styles.goText}>Go</Text>
           </Pressable>
         )}
@@ -177,10 +243,12 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
       {/* Content */}
       {activeTab === 'chat' ? (
         messages.length > 0 ? (
-          <BottomSheetFlatList
+          <FlatList
+            ref={listRef}
             data={messages}
-            keyExtractor={(_: ChatMessage, i: number) => String(i)}
-            renderItem={({ item }: { item: ChatMessage }) => <ChatMessageRow message={item} />}
+            keyExtractor={(_, i) => String(i)}
+            renderItem={({ item }) => <ChatMessageRow message={item} />}
+            style={styles.list}
             contentContainerStyle={styles.listContent}
             ListFooterComponent={isRunning ? <ThinkingFooter loopState={loopState} /> : null}
           />
@@ -190,13 +258,14 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
       ) : (
         <View style={styles.empty}><Text style={styles.emptyText}>Debug telemetry coming soon</Text></View>
       )}
-    </BottomSheet>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  sheetBg: { backgroundColor: '#222' },
-  handle: { backgroundColor: '#444', width: 32, height: 3 },
+  container: { backgroundColor: '#222', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#333', overflow: 'hidden' },
+  handleArea: { alignItems: 'center', paddingVertical: 10 },
+  handle: { width: 32, height: 4, borderRadius: 2, backgroundColor: '#444' },
   goalRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
   goalInput: { flex: 1, backgroundColor: '#2a2a2a', borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: '#333', color: '#ededed', fontSize: 14, height: 38, paddingHorizontal: 12 },
   goalInputRunning: { borderColor: '#444', opacity: 0.6 },
@@ -215,6 +284,7 @@ const styles = StyleSheet.create({
   clearBtn: { paddingHorizontal: 8, paddingVertical: 4, alignSelf: 'center' },
   clearText: { color: '#555', fontSize: 11, fontWeight: '500' },
   modelLabel: { color: '#555', fontSize: 11, fontWeight: '500', alignSelf: 'center', paddingRight: 4 },
+  list: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingVertical: 12, gap: 10 },
   userRow: { alignItems: 'flex-end' },
   userBubble: { backgroundColor: '#2a2a2a', borderRadius: 12, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 10, maxWidth: '85%' },
