@@ -684,6 +684,15 @@ export function buildBridgeBootstrapScript() {
         }
         if (element.disabled) desc += ' [disabled]';
 
+        var expanded = element.getAttribute('aria-expanded');
+        if (expanded !== null) desc += ' [expanded=' + expanded + ']';
+        var selected = element.getAttribute('aria-selected');
+        if (selected === 'true') desc += ' [selected]';
+        var ariaChecked = element.getAttribute('aria-checked');
+        if (ariaChecked !== null && element.type !== 'checkbox' && element.type !== 'radio') {
+          desc += ' [checked=' + ariaChecked + ']';
+        }
+
         emit(depth, desc);
         return;
       }
@@ -697,6 +706,17 @@ export function buildBridgeBootstrapScript() {
             headingText = headingText.substring(0, TREE_TEXT_MAX_CHARS) + '...';
           }
           emit(depth, 'heading "' + headingText + '" [level=' + headingLevel + ']');
+        }
+        return;
+      }
+
+      if (tagName === 'IMG') {
+        var alt = normalizeString(element.getAttribute('alt'));
+        if (alt) {
+          if (alt.length > TREE_TEXT_MAX_CHARS) {
+            alt = alt.substring(0, TREE_TEXT_MAX_CHARS) + '...';
+          }
+          emit(depth, 'image "' + alt + '"');
         }
         return;
       }
@@ -728,7 +748,24 @@ export function buildBridgeBootstrapScript() {
       }
     }
 
-    walk(document.body, 0);
+    // Prioritize <main> content: walk it first so it gets budget priority.
+    var mainEl = document.querySelector('main, [role="main"]');
+    if (mainEl) {
+      emit(0, 'main');
+      var mainChildren = mainEl.childNodes;
+      for (var m = 0; m < mainChildren.length; m++) {
+        walk(mainChildren[m], 1);
+      }
+      // Walk remaining body children, skipping main.
+      var bodyChildren = document.body.childNodes;
+      for (var b = 0; b < bodyChildren.length; b++) {
+        var child = bodyChildren[b];
+        if (child === mainEl) continue;
+        walk(child, 0);
+      }
+    } else {
+      walk(document.body, 0);
+    }
     return lines.join('\\n');
   }
 
