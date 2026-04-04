@@ -76,6 +76,101 @@ export const ACTIONS_INJECTION_SCRIPT = `
       return { ok: true, reason: null };
     },
 
+    fill: function(elementId, text) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      el.focus();
+      try {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          var nativeSetter = Object.getOwnPropertyDescriptor(
+            Object.getPrototypeOf(el).constructor.prototype, 'value'
+          );
+          if (nativeSetter && nativeSetter.set) {
+            nativeSetter.set.call(el, text);
+          } else {
+            el.value = text;
+          }
+        } else if ('value' in el) {
+          el.value = text;
+        } else {
+          el.textContent = text;
+        }
+      } catch (e) {
+        try { el.value = text; } catch (_) {}
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, reason: null };
+    },
+
+    select: function(elementId, value) {
+      var el = findById(elementId);
+      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      if (!(el instanceof HTMLSelectElement)) {
+        return { ok: false, reason: 'Element is not a <select>: ' + elementId };
+      }
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      // Try matching by value first, then by visible text.
+      var found = false;
+      for (var i = 0; i < el.options.length; i++) {
+        if (el.options[i].value === value || el.options[i].text === value) {
+          el.selectedIndex = i;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // Fuzzy match: case-insensitive contains.
+        var lower = value.toLowerCase();
+        for (var j = 0; j < el.options.length; j++) {
+          if (el.options[j].text.toLowerCase().indexOf(lower) !== -1) {
+            el.selectedIndex = j;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        return { ok: false, reason: 'No matching option for: ' + value };
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, reason: null };
+    },
+
+    waitForCondition: function(condition, timeoutMs) {
+      // Returns a promise that resolves when condition is met or timeout.
+      // Conditions: 'idle' (default), 'url:pattern', 'selector:css', 'text:substring'
+      timeoutMs = timeoutMs || 3000;
+      condition = condition || 'idle';
+      return new Promise(function(resolve) {
+        var start = Date.now();
+        function check() {
+          if (Date.now() - start > timeoutMs) {
+            return resolve({ ok: true, reason: 'timeout' });
+          }
+          var met = false;
+          if (condition === 'idle') {
+            met = document.readyState === 'complete';
+          } else if (condition.indexOf('url:') === 0) {
+            met = window.location.href.indexOf(condition.substring(4)) !== -1;
+          } else if (condition.indexOf('selector:') === 0) {
+            met = document.querySelector(condition.substring(9)) !== null;
+          } else if (condition.indexOf('text:') === 0) {
+            met = (document.body.innerText || '').indexOf(condition.substring(5)) !== -1;
+          } else {
+            met = true;
+          }
+          if (met) {
+            return resolve({ ok: true, reason: null });
+          }
+          setTimeout(check, 200);
+        }
+        check();
+      });
+    },
+
     scroll: function(direction, amount) {
       var distances = {
         page: 600, half: 300, small: 100

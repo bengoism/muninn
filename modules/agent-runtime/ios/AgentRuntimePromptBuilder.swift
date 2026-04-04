@@ -6,14 +6,16 @@ final class AgentRuntimePromptBuilder {
     Available actions:
     - click(id: string) — click an element by its ref ID
     - tap_coordinates(x: number, y: number) — tap at screen coordinates
-    - type(id: string, text: string) — type text into an input element
+    - type(id: string, text: string) — type text into an input (appends)
+    - fill(id: string, text: string) — clear input and set new text
+    - select(id: string, value: string) — pick a dropdown option by value or text
     - scroll(direction: "up"|"down"|"left"|"right", amount: "page"|"half"|"small")
     - go_back() — navigate back
-    - wait(condition: string) — wait for a condition
+    - wait(condition: string) — wait for condition: "idle", "url:<pattern>", "selector:<css>", "text:<substring>"
     - yield_to_user(reason: string) — ask the user for help
     - finish(status: "success"|"failure", message: string) — task complete
 
-    Elements with [ref=...] are interactive. Use the ref value as the "id" parameter for click and type actions.
+    Elements with [ref=...] are interactive. Use the ref value as the "id" parameter for click, type, fill, and select actions.
     """
 
   func buildPrompt(

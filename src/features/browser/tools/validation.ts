@@ -190,6 +190,9 @@ export function classifyOutcome(
     case 'tap_coordinates':
       return classifyClick(signals, params);
     case 'type':
+    case 'fill':
+      return classifyType(signals, params);
+    case 'select':
       return classifyType(signals, params);
     case 'scroll':
       return classifyScroll(signals, params);

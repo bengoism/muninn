@@ -569,11 +569,21 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
           @"x": @{ @"type": @"number", @"description": @"X coordinate" },
           @"y": @{ @"type": @"number", @"description": @"Y coordinate" } },
           @"required": @[ @"x", @"y" ] } } },
-      @{ @"function": @{ @"name": @"type", @"description": @"Type text into an input element",
+      @{ @"function": @{ @"name": @"type", @"description": @"Type text into an input element (appends)",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"id": @{ @"type": @"string", @"description": @"Element accessibility ID" },
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" },
           @"text": @{ @"type": @"string", @"description": @"Text to type" } },
           @"required": @[ @"id", @"text" ] } } },
+      @{ @"function": @{ @"name": @"fill", @"description": @"Clear input field and set new text",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" },
+          @"text": @{ @"type": @"string", @"description": @"Text to fill" } },
+          @"required": @[ @"id", @"text" ] } } },
+      @{ @"function": @{ @"name": @"select", @"description": @"Pick a dropdown option by value or visible text",
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"id": @{ @"type": @"string", @"description": @"Select element ref ID" },
+          @"value": @{ @"type": @"string", @"description": @"Option value or visible text" } },
+          @"required": @[ @"id", @"value" ] } } },
       @{ @"function": @{ @"name": @"scroll", @"description": @"Scroll the page",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"direction": @{ @"type": @"string", @"description": @"up, down, left, or right" },
@@ -581,9 +591,9 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
           @"required": @[ @"direction", @"amount" ] } } },
       @{ @"function": @{ @"name": @"go_back", @"description": @"Navigate back",
         @"parameters": @{ @"type": @"object", @"properties": @{} } } },
-      @{ @"function": @{ @"name": @"wait", @"description": @"Wait for a condition",
+      @{ @"function": @{ @"name": @"wait", @"description": @"Wait for a condition: idle, url:<pattern>, selector:<css>, text:<substring>",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"condition": @{ @"type": @"string", @"description": @"Condition to wait for" } },
+          @"condition": @{ @"type": @"string", @"description": @"idle, url:<pattern>, selector:<css>, or text:<substring>" } },
           @"required": @[ @"condition" ] } } },
       @{ @"function": @{ @"name": @"yield_to_user", @"description": @"Ask the user for help",
         @"parameters": @{ @"type": @"object", @"properties": @{

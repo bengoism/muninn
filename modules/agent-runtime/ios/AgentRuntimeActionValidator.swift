@@ -5,6 +5,8 @@ final class AgentRuntimeActionValidator {
     "click",
     "tap_coordinates",
     "type",
+    "fill",
+    "select",
     "scroll",
     "go_back",
     "wait",
@@ -33,6 +35,12 @@ final class AgentRuntimeActionValidator {
     case "type":
       try requireString(named: "id", in: candidate)
       try requireString(named: "text", in: candidate)
+    case "fill":
+      try requireString(named: "id", in: candidate)
+      try requireString(named: "text", in: candidate)
+    case "select":
+      try requireString(named: "id", in: candidate)
+      try requireString(named: "value", in: candidate)
     case "scroll":
       try requireString(named: "direction", in: candidate)
       try requireString(named: "amount", in: candidate)

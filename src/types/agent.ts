@@ -2,6 +2,8 @@ export type ToolName =
   | 'click'
   | 'tap_coordinates'
   | 'type'
+  | 'fill'
+  | 'select'
   | 'scroll'
   | 'go_back'
   | 'wait'
