@@ -12,6 +12,7 @@ type BottomPanelProps = {
   onCancel: () => void;
   isRunning: boolean;
   modelReady: boolean;
+  modelName: string | null;
 };
 
 function formatStep(msg: ChatMessage & { type: 'agent_step' }): string {
@@ -77,7 +78,7 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
   return null;
 }
 
-export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: BottomPanelProps) {
+export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelName }: BottomPanelProps) {
   const sheetRef = useRef<BottomSheet>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const snapPoints = useMemo(() => [100, '50%', '85%'], []);
@@ -169,6 +170,10 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady }: Bottom
             DEBUG
           </Text>
         </Pressable>
+        <View style={styles.tabSpacer} />
+        {modelName && (
+          <Text style={styles.modelLabel}>{modelName}</Text>
+        )}
       </View>
 
       {/* Content */}
@@ -291,6 +296,16 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: '#ededed',
+  },
+  tabSpacer: {
+    flex: 1,
+  },
+  modelLabel: {
+    color: '#555',
+    fontSize: 11,
+    fontWeight: '500',
+    alignSelf: 'center',
+    paddingRight: 4,
   },
   listContent: {
     paddingHorizontal: 16,

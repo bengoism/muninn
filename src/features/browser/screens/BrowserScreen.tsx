@@ -374,6 +374,7 @@ export function BrowserScreen() {
           onCancel={agentLoop.cancel}
           isRunning={agentLoop.isRunning}
           modelReady={hasDownloadedModel}
+          modelName={activeModel?.displayName ?? null}
         />
 
         {showDiagnostics && (
