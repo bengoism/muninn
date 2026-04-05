@@ -9,9 +9,61 @@ export const ACTIONS_INJECTION_SCRIPT = `
   if (window.__MUNINN_ACTIONS__) return;
 
   function findById(elementId) {
+    // Strategy 1: Short ref via ref map (e1, e2, etc.)
+    var refMap = window.__MUNINN_REF_MAP__ || {};
+    var entry = refMap[elementId];
+    if (entry) {
+      // 1a: Try data-ai-internal-id attribute (fast path)
+      var el = document.querySelector('[data-ai-internal-id="' + entry.domId + '"]');
+      if (el) return el;
+
+      // 1b: Re-query by CSS selector + label match (survives React re-renders)
+      try {
+        var candidates = document.querySelectorAll(entry.selector);
+        for (var i = 0; i < candidates.length; i++) {
+          var c = candidates[i];
+          var cLabel = '';
+          var ariaLabel = c.getAttribute('aria-label');
+          if (ariaLabel) { cLabel = ariaLabel; }
+          else if (c.innerText) { cLabel = c.innerText.trim().substring(0, 100); }
+          else if (c.textContent) { cLabel = c.textContent.trim().substring(0, 100); }
+
+          if (entry.label && cLabel.indexOf(entry.label.substring(0, 30)) !== -1) {
+            c.setAttribute('data-ai-internal-id', entry.domId);
+            return c;
+          }
+        }
+      } catch (e) {}
+
+      // 1c: Try all interactive elements matching the role
+      try {
+        var role = entry.role;
+        var roleSelector = '[role="' + role + '"]';
+        if (role === 'textbox') roleSelector = 'input, textarea, [role="textbox"], [contenteditable]';
+        else if (role === 'button') roleSelector = 'button, [role="button"]';
+        else if (role === 'link') roleSelector = 'a[href], [role="link"]';
+        else if (role === 'combobox') roleSelector = 'select, [role="combobox"]';
+
+        var roleEls = document.querySelectorAll(roleSelector);
+        for (var r = 0; r < roleEls.length; r++) {
+          var re = roleEls[r];
+          if (!re.getAttribute('data-ai-internal-id')) {
+            var reLabel = re.getAttribute('aria-label') || re.getAttribute('placeholder') || '';
+            if (entry.label && reLabel.indexOf(entry.label.substring(0, 20)) !== -1) {
+              re.setAttribute('data-ai-internal-id', entry.domId);
+              return re;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Strategy 2: Direct attribute lookup (legacy long IDs)
     var el = document.querySelector('[data-ai-internal-id="' + elementId + '"]');
-    if (!el) el = document.getElementById(elementId);
-    return el;
+    if (el) return el;
+
+    // Strategy 3: Try as HTML id
+    return document.getElementById(elementId);
   }
 
   function dispatchMouseEvents(el) {
@@ -44,6 +96,7 @@ export const ACTIONS_INJECTION_SCRIPT = `
       var el = findById(elementId);
       if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      dispatchMouseEvents(el);
       el.focus();
       try {
         if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
@@ -80,6 +133,7 @@ export const ACTIONS_INJECTION_SCRIPT = `
       var el = findById(elementId);
       if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      dispatchMouseEvents(el);
       el.focus();
       try {
         if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {

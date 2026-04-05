@@ -570,6 +570,38 @@ export function buildBridgeBootstrapScript() {
   var TREE_MAX_CHARS = 4000;
   var TREE_TEXT_MAX_CHARS = 120;
 
+  // Short ref system: e1, e2, e3... reset per snapshot.
+  // refMap stored on window for executor to resolve.
+  var snapshotRefCounter = 0;
+  var snapshotRefMap = {};
+
+  function assignShortRef(element) {
+    snapshotRefCounter++;
+    var shortRef = 'e' + snapshotRefCounter;
+    var domId = ensureNodeId(element);
+    var role = getElementRole(element);
+    var label = getElementLabel(element);
+
+    // Build a CSS selector for fallback lookup.
+    var tag = element.tagName.toLowerCase();
+    var roleAttr = element.getAttribute('role');
+    var selector = roleAttr ? tag + '[role="' + roleAttr + '"]' : tag;
+
+    snapshotRefMap[shortRef] = {
+      domId: domId,
+      role: role,
+      label: label || '',
+      selector: selector,
+    };
+
+    return shortRef;
+  }
+
+  function resetSnapshotRefs() {
+    snapshotRefCounter = 0;
+    snapshotRefMap = {};
+  }
+
   function isCursorInteractive(element) {
     if (NATIVE_INTERACTIVE_TAGS.has(element.tagName)) return false;
     if (element.matches(INTERACTIVE_SELECTOR)) return false;
@@ -669,18 +701,25 @@ export function buildBridgeBootstrapScript() {
         var label = getElementLabel(element);
         var value = isInteractive ? getElementValue(element) : null;
         var placeholder = isInteractive ? getElementPlaceholder(element) : null;
-        var id = ensureNodeId(element);
+        var shortRef = assignShortRef(element);
 
         var desc = role;
         if (label) desc += ' "' + label + '"';
-        desc += ' [ref=' + id + ']';
-        if (isCursorClickable) desc += ' clickable';
+        desc += ' [ref=' + shortRef + ']';
+        if (isCursorClickable) {
+          var hints = [];
+          if (element.getAttribute('onclick')) hints.push('onclick');
+          var cs = getComputedStyleSafe(element);
+          if (cs && cs.cursor === 'pointer') hints.push('cursor:pointer');
+          if (element.getAttribute('tabindex')) hints.push('tabindex');
+          desc += ' clickable' + (hints.length ? ' [' + hints.join(', ') + ']' : '');
+        }
         if (headingLevel) desc += ' [level=' + headingLevel + ']';
         if (value !== null && value !== label) desc += ': "' + (value.length > 80 ? value.substring(0, 80) + '...' : value) + '"';
         if (placeholder) desc += ' (placeholder: "' + placeholder + '")';
 
         if (element.type === 'checkbox' || element.type === 'radio') {
-          desc += element.checked ? ' [checked]' : '';
+          desc += element.checked ? ' [checked=true]' : ' [checked=false]';
         }
         if (element.disabled) desc += ' [disabled]';
 
@@ -705,7 +744,8 @@ export function buildBridgeBootstrapScript() {
           if (headingText.length > TREE_TEXT_MAX_CHARS) {
             headingText = headingText.substring(0, TREE_TEXT_MAX_CHARS) + '...';
           }
-          emit(depth, 'heading "' + headingText + '" [level=' + headingLevel + ']');
+          var hRef = assignShortRef(element);
+          emit(depth, 'heading "' + headingText + '" [level=' + headingLevel + ', ref=' + hRef + ']');
         }
         return;
       }
@@ -773,9 +813,18 @@ export function buildBridgeBootstrapScript() {
     var nodes = [];
     var seen = new Set();
     collectInteractiveElements(document.documentElement, nodes, seen);
+
+    // Reset short refs and build tree (assigns refs during walk).
+    resetSnapshotRefs();
+    var treeText = buildAxTree();
+
+    // Store ref map on window for executor to resolve.
+    window.__MUNINN_REF_MAP__ = snapshotRefMap;
+
     return {
       nodes: nodes.map(serializeNode),
-      treeText: buildAxTree(),
+      treeText: treeText,
+      refMap: snapshotRefMap,
     };
   }
 
@@ -786,6 +835,7 @@ export function buildBridgeBootstrapScript() {
         requestId: requestId,
         nodes: payload.nodes,
         treeText: payload.treeText,
+        refMap: payload.refMap,
         observedAt: nowIso(),
       });
     } catch (error) {

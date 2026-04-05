@@ -89,10 +89,18 @@ export type BrowserAxSnapshotNodePayload = {
   redactionReason: string | null;
 };
 
+export type BrowserAxSnapshotRefEntry = {
+  domId: string;
+  role: string;
+  label: string;
+  selector: string;
+};
+
 export type BrowserAxSnapshotPayload = {
   requestId: string;
   nodes: BrowserAxSnapshotNodePayload[];
   treeText: string;
+  refMap: Record<string, BrowserAxSnapshotRefEntry>;
   observedAt: string;
 };
 
