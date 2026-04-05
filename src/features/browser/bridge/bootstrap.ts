@@ -874,6 +874,31 @@ export function buildBridgeBootstrapScript() {
     }
   }
 
+  runtime.refreshNodeIds = function refreshNodeIds() {
+    // Re-scan interactive elements and re-assign data-ai-internal-id
+    // to elements that lost their attribute due to React/SPA re-renders.
+    var refMap = window.__MUNINN_REF_MAP__ || {};
+    for (var ref in refMap) {
+      var entry = refMap[ref];
+      var existing = document.querySelector('[data-ai-internal-id="' + entry.domId + '"]');
+      if (existing) continue;
+
+      // Try to find by selector + label
+      try {
+        var candidates = document.querySelectorAll(entry.selector);
+        for (var i = 0; i < candidates.length; i++) {
+          var c = candidates[i];
+          if (c.getAttribute('data-ai-internal-id')) continue;
+          var cLabel = getElementLabel(c);
+          if (cLabel && entry.label && cLabel.indexOf(entry.label.substring(0, 30)) !== -1) {
+            c.setAttribute(NODE_ID_ATTR, entry.domId);
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+  };
+
   runtime.requestAxSnapshot = function requestAxSnapshot(requestId) {
     markActivity('ax-snapshot-requested');
     postFrameReady();

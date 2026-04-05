@@ -65,6 +65,24 @@ export async function executeTool(
   // Browser actions need injected JS helpers.
   await ensureActionsInjected(browser);
 
+  // Refresh element IDs before acting — re-assigns data-ai-internal-id
+  // to elements that may have been re-rendered by React/SPA frameworks.
+  if (typeof params.id === 'string') {
+    await browser.evaluateJavaScript(`
+      (function() {
+        var refMap = window.__MUNINN_REF_MAP__ || {};
+        var entry = refMap["${escapeJS(String(params.id))}"];
+        if (!entry) return;
+        var existing = document.querySelector('[data-ai-internal-id="' + entry.domId + '"]');
+        if (existing) return;
+        // Element lost its ID — find it by observation bridge's own logic
+        if (window.__MUNINN_OBSERVATION__ && window.__MUNINN_OBSERVATION__.refreshNodeIds) {
+          window.__MUNINN_OBSERVATION__.refreshNodeIds();
+        }
+      })()
+    `);
+  }
+
   let jsCall: string;
   switch (action) {
     case 'click':
