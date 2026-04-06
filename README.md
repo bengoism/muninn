@@ -1,6 +1,6 @@
 # Muninn
 
-Muninn is an iOS-first browser for on-device agentic web automation. It is a private mobile browser where a user describes a task in natural language, the app understands the rendered page visually, reasons locally, and performs browser actions inside the iOS sandbox — without shipping page screenshots or DOM data to the cloud.
+Muninn is an iOS browser for on-device agentic web automation. It is a private mobile browser where a user describes a task in natural language, the app understands the rendered page visually, reasons locally, and performs browser actions inside the iOS sandbox — without shipping page screenshots or DOM data to the cloud.
 
 ## Why
 
