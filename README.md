@@ -36,9 +36,9 @@ This matters for three reasons:
 │ Observation  │  │   Native     │  │    Tool Executor        │
 │ Pipeline     │  │  Inference   │  │                         │
 │              │  │              │  │  click    tap_coords    │
-│ AX tree      │  │  LiteRT-LM   │  │  type     fill         │
-│ screenshot   │  │  / replay    │  │  select   gettext      │
-│ frame stitch │  │              │  │  hover    focus         │
+│ AX tree      │  │ Gemma 4 E2B  │  │  type     fill         │
+│ screenshot   │  │ via LiteRT-LM│  │  select   gettext      │
+│ frame stitch │  │  (on-device) │  │  hover    focus         │
 │ short refs   │  │              │  │  eval     scroll       │
 │              │  │              │  │  go_back  wait         │
 │              │  │              │  │  yield_to_user  finish  │
@@ -59,14 +59,14 @@ This matters for three reasons:
 
 1. **Browser layer** — `WKWebView` via `react-native-webview` renders pages, captures the viewport, and serves as the execution surface for browser actions.
 2. **Bridge layer** — Expo + React Native orchestrate browser state, observation timing, action execution, and message passing between JavaScript and native code. Zustand holds browser and agent session state.
-3. **Intelligence layer** — native Swift modules host the on-device inference runtime. Current targets are LiteRT-LM and replay-based backends for local action selection.
+3. **Intelligence layer** — native Swift modules host the on-device inference runtime. The target model is **Gemma 4 E2B** (`gemma-4-e2b-it`, ~2.6 GB), a multimodal vision-language model that processes both the viewport screenshot and the accessibility tree to choose the next action. The model runs on-device via **LiteRT-LM** (CPU/GPU backends) — no cloud calls required. A replay-based backend is also available for deterministic testing.
 
 ## How The Agent Works
 
 The agent loop runs in `use-agent-loop.ts` and cycles through these phases per step:
 
 1. **Observe** — wait for page quiescence, capture a viewport screenshot and an accessibility-backed snapshot of interactive elements (stitched across iframes).
-2. **Reason** — send the observation, goal, and recent action history to the native inference module. Get back an action + parameters.
+2. **Reason** — send the viewport screenshot, accessibility tree, goal, and recent action history to Gemma 4 E2B running on-device via LiteRT-LM. The model uses its multimodal capabilities to see the page visually and read the semantic element map, then returns the next action + parameters.
 3. **Act** — execute the chosen tool in the browser via injected JavaScript. Elements are located using short refs (`e1`, `e2`, …) with multi-level fallback (data attribute → selector+label match → role+text match).
 4. **Validate** — capture a post-action snapshot and classify the outcome: `success`, `no_op`, `partial_success`, `blocked`, `stale_ref`, or `unrecoverable`.
 5. **Retry** — on failure, attempt a single fallback (e.g. `click` → `tap_coordinates`, `scroll` with reduced amount).
