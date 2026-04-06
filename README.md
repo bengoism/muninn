@@ -12,6 +12,11 @@ This matters for three reasons:
 - **Reliability** — modern sites use SPAs, canvas surfaces, Shadow DOM, and other patterns that defeat selector-heavy automation
 - **Responsiveness** — browser, perception loop, and action execution all live in the app
 
+<p align="center">
+  <img width="295" alt="IMG_2222" src="https://github.com/user-attachments/assets/c01f009c-11ae-4db6-b2c5-c0645beadd7b" />
+  <img width="295" alt="IMG_2223" src="https://github.com/user-attachments/assets/df856bcc-d0af-4bb7-876b-0eb0185d20cf" />
+</p>
+
 ## Architecture
 
 ```
