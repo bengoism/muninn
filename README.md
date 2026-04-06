@@ -13,8 +13,8 @@ This matters for three reasons:
 - **Responsiveness** — browser, perception loop, and action execution all live in the app
 
 <p align="center">
-  <img width="295"  alt="IMG_2226" src="https://github.com/user-attachments/assets/268c437c-a606-4122-bb32-dcdb8904670a" />
   <img width="295" alt="IMG_2224" src="https://github.com/user-attachments/assets/d76f532e-8c8e-48b2-a684-83ab07a4bd32" />
+  <img width="295"  alt="IMG_2226" src="https://github.com/user-attachments/assets/268c437c-a606-4122-bb32-dcdb8904670a" />  
 </p>
 
 
