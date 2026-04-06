@@ -1,83 +1,118 @@
 # Muninn
 
-Muninn is an iOS-first browser for on-device agentic web automation. The end goal is a private mobile browser where a user can describe a task in natural language, the app understands the rendered page visually, reasons locally, and performs the next browser action inside the iOS sandbox without shipping page screenshots or DOM data to the cloud.
+Muninn is an iOS-first browser for on-device agentic web automation. It is a private mobile browser where a user describes a task in natural language, the app understands the rendered page visually, reasons locally, and performs browser actions inside the iOS sandbox — without shipping page screenshots or DOM data to the cloud.
 
-## Product Overview
+## Why
 
-Most browser agents today depend on server-side automation and brittle DOM selectors. Muninn is aimed at a different model: on-device visual grounding. Instead of assuming a page can be reliably controlled through XPath, CSS selectors, or a remote browser session, the app is designed to observe the page the way a human does, combine that with a semantic snapshot of interactive elements, and choose actions locally.
+Most browser agents depend on server-side automation and brittle DOM selectors. Muninn takes a different approach: on-device visual grounding. Instead of controlling pages through XPath, CSS selectors, or a remote browser session, the app observes the page the way a human does — combining a viewport screenshot with a semantic snapshot of interactive elements — and chooses actions locally.
 
-That direction matters for three reasons:
+This matters for three reasons:
 
-- privacy, because reasoning and page understanding stay on the device
-- reliability, because modern sites often use SPAs, canvas surfaces, Shadow DOM, and other UI patterns that defeat selector-heavy automation
-- responsiveness, because the browser, perception loop, and action execution all live in the app rather than across a remote control plane
+- **Privacy** — reasoning and page understanding stay on the device
+- **Reliability** — modern sites use SPAs, canvas surfaces, Shadow DOM, and other patterns that defeat selector-heavy automation
+- **Responsiveness** — browser, perception loop, and action execution all live in the app
 
-## End Goal
+## Architecture
 
-The product target is a zero-friction AI browser agent for iPhone:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        User Goal                            │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
+│                       Agent Loop                            │
+│   observe ─► reason ─► act ─► validate ─► retry/recover     │
+│       ▲                                       │             │
+│       └───────────────────────────────────────┘             │
+└───────┬────────────────┬──────────────────┬─────────────────┘
+        │                │                  │
+┌───────▼──────┐  ┌──────▼───────┐  ┌──────▼──────────────────┐
+│ Observation  │  │   Native     │  │    Tool Executor        │
+│ Pipeline     │  │  Inference   │  │                         │
+│              │  │              │  │  click    tap_coords    │
+│ AX tree      │  │  LiteRT-LM   │  │  type     fill         │
+│ screenshot   │  │  / replay    │  │  select   gettext      │
+│ frame stitch │  │              │  │  hover    focus         │
+│ short refs   │  │              │  │  eval     scroll       │
+│              │  │              │  │  go_back  wait         │
+│              │  │              │  │  yield_to_user  finish  │
+└───────┬──────┘  └──────┬───────┘  └──────┬──────────────────┘
+        │                │                 │
+┌───────▼────────────────▼─────────────────▼──────────────────┐
+│                    Browser Bridge                           │
+│         bootstrap.ts · protocol.ts · bridge messages        │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
+│               WKWebView  (BrowserHostModule)                │
+│          react-native-webview · viewport capture            │
+└─────────────────────────────────────────────────────────────┘
+```
 
-- the user states a goal such as searching, navigating, filling a form, or completing a multi-step flow
-- the browser captures the visible page and a lightweight semantic map of what can be interacted with
-- an on-device model decides the next action using the current UI and a short recent action history
-- the app executes that action directly in the browser, validates the result, and continues until the task is done or needs user help
+**Three layers:**
 
-The long-term value proposition is not just "chat inside a browser." It is a browser that can actually operate hostile real-world web interfaces while keeping sensitive browsing context on-device.
-
-## Intended Architecture
-
-Muninn is being built around a three-layer agent loop. This is the target architecture for the project, not a statement that the full stack is already complete today.
-
-1. **Browser layer:** `WKWebView` via `react-native-webview` renders pages, captures the viewport, and serves as the execution surface for browser actions.
-2. **Bridge layer:** Expo + React Native orchestrate browser state, observation timing, action execution, and file-based handoff between JavaScript and native code. Zustand holds browser and agent session state.
-3. **Intelligence layer:** native Swift modules are intended to host the on-device inference runtime, with Google AI Edge / MediaPipe and Gemma-class vision-language models as the current target direction for local spatial reasoning and action selection.
+1. **Browser layer** — `WKWebView` via `react-native-webview` renders pages, captures the viewport, and serves as the execution surface for browser actions.
+2. **Bridge layer** — Expo + React Native orchestrate browser state, observation timing, action execution, and message passing between JavaScript and native code. Zustand holds browser and agent session state.
+3. **Intelligence layer** — native Swift modules host the on-device inference runtime. Current targets are LiteRT-LM and replay-based backends for local action selection.
 
 ## How The Agent Works
 
-At a high level, the intended loop is:
+The agent loop runs in `use-agent-loop.ts` and cycles through these phases per step:
 
-1. Wait for the page to settle after navigation or an action.
-2. Capture the current viewport and collect an accessibility-backed snapshot of interactive elements.
-3. Assemble a compact reasoning payload with the user goal and recent action history.
-4. Run local inference to choose the next action.
-5. Execute that action in the browser.
-6. Re-observe the page, validate that the UI changed, and either continue, recover, or yield back to the user.
+1. **Observe** — wait for page quiescence, capture a viewport screenshot and an accessibility-backed snapshot of interactive elements (stitched across iframes).
+2. **Reason** — send the observation, goal, and recent action history to the native inference module. Get back an action + parameters.
+3. **Act** — execute the chosen tool in the browser via injected JavaScript. Elements are located using short refs (`e1`, `e2`, …) with multi-level fallback (data attribute → selector+label match → role+text match).
+4. **Validate** — capture a post-action snapshot and classify the outcome: `success`, `no_op`, `partial_success`, `blocked`, `stale_ref`, or `unrecoverable`.
+5. **Retry** — on failure, attempt a single fallback (e.g. `click` → `tap_coordinates`, `scroll` with reduced amount).
+6. **Stuck recovery** — detect repeated failures, consecutive no-ops (threshold: 3), or identical repeated actions, and recover by reobserving, navigating back, or stopping.
 
-The planned action vocabulary is:
+The loop runs until the task is complete, the user cancels, the step budget (default 30) is exhausted, or an unrecoverable error occurs.
 
-- `click`
-- `tap_coordinates`
-- `type`
-- `scroll`
-- `go_back`
-- `wait`
-- `yield_to_user`
-- `finish`
+## Action Vocabulary
 
-## Current Implementation Status
+The agent can perform 14 actions:
 
-The repo is currently a working bootstrap for that architecture, not the finished product. Today it includes:
+| Action | Description |
+|--------|-------------|
+| `click` | Click an element by ref ID |
+| `tap_coordinates` | Tap at (x, y) viewport coordinates |
+| `type` | Type text into the focused element |
+| `fill` | Clear a field and type new text |
+| `select` | Choose an option from a dropdown |
+| `gettext` | Read text content from an element |
+| `hover` | Hover over an element |
+| `focus` | Focus an element |
+| `eval` | Execute arbitrary JavaScript |
+| `scroll` | Scroll in a direction (up/down/left/right) by amount (small/half/page) |
+| `go_back` | Browser back navigation |
+| `wait` | Wait for a condition or timeout |
+| `yield_to_user` | Pause and return control to the user |
+| `finish` | Mark the task as complete |
 
-- an Expo app shell with browser chrome and a mounted `WebView`
-- app-local native modules for the browser host and agent runtime boundary
-- typed TypeScript contracts for observations, actions, and inference requests/responses
-- observation plumbing for viewport capture, browser telemetry, and accessibility snapshot stitching across frames
-- Zustand scaffolding for browser state and agent session state
-- a stubbed `runInference` native call that returns typed actions without a production on-device model runtime
+## Current Status
 
-What is not complete yet:
+**Working today:**
 
-- a production on-device VLM runtime
-- the full autonomous perception-reasoning-action loop
-- hardened action validation, retry behavior, and recovery for hostile web UIs
-- the full privacy, performance, and memory envelope described by the product vision
+- Full browser shell with URL navigation, back/forward, reload, and progress indicator
+- Agent loop with observation → reasoning → action → validation → retry cycle
+- All 14 tools with execution, validation, and fallback chains
+- Observation pipeline: viewport screenshot + accessibility tree + multi-frame stitching
+- Short ref system (`e1`, `e2`, …) with resilient element lookup that survives React re-renders
+- Action outcome classification and stuck state detection/recovery
+- Chat UI showing agent steps and outcomes in a draggable bottom panel
+- Native module interfaces for inference and browser hosting
+- Model management: download, status check, smoke test
 
-The current codebase should be read as infrastructure for the eventual on-device browser agent rather than a finished AI browser.
+**Not complete yet:**
+
+- Production on-device VLM runtime (inference module currently uses replay/stub backends)
+- Full privacy and performance envelope described by the product vision
 
 ## Stack
 
 - Expo SDK 54 with Expo Router
 - React Native + TypeScript
-- Zustand for bootstrap state scaffolding
+- Zustand for state management
 - `react-native-webview` for the browser surface
 - App-local Expo native modules in `modules/agent-runtime` and `modules/browser-host`
 
