@@ -469,10 +469,24 @@ function detectPhase(
     /\b(checkout|shipping|billing|payment|place order|review order|shopping cart|your cart)\b/.test(
       `${urlText}\n${treeText}`,
     );
-  const hasFormWords =
-    /\b(origin|destination|departure|return|from|to|email|password|address|phone|date)\b/.test(
+  const hasSpecificFormWords =
+    /\b(origin|destination|departure|return|email|password|address|phone|date)\b/.test(
       treeText,
     );
+  const hasTravelFormWords =
+    /\b(from|to)\b/.test(treeText) &&
+    /\b(origin|destination|departure|return|flight|traveler|travellers|economy|round trip|one-way)\b/.test(
+      treeText,
+    );
+  const hasFormWords = hasSpecificFormWords || hasTravelFormWords;
+  const hasSearchHomepageSignals =
+    hasSearchbox &&
+    textEntryCount <= 1 &&
+    refEntries.length >= 8 &&
+    !hasResultsUrl &&
+    !hasResultsWords &&
+    !hasDetailPath &&
+    !hasDetailWords;
 
   if (hasCheckoutWords) {
     return 'checkout';
@@ -488,6 +502,10 @@ function detectPhase(
 
   if (hasDetailWords) {
     return 'detail';
+  }
+
+  if (hasSearchHomepageSignals) {
+    return 'search';
   }
 
   if (textEntryCount >= 2 || (hasFormWords && textEntryCount >= 1)) {

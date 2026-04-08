@@ -9,6 +9,7 @@ import {
   findActiveAvoidRef,
   reduceSessionPlan,
 } from '../planning';
+import { shouldBlockFinishSuccess } from '../planning-guards';
 
 function makeObservationResult(
   overrides: Partial<ObservationResult> = {},
@@ -239,6 +240,85 @@ describe('session planning', () => {
     expect(findItem(next, 'todo-form')).toMatchObject({
       status: 'in_progress',
     });
+  });
+
+  it('classifies search-heavy homepages as search instead of form', () => {
+    const plan = createSessionPlan('find a good deal on mens socks');
+    const next = reduceSessionPlan(plan, {
+      type: 'observation',
+      goal: 'find a good deal on mens socks',
+      observation: makeObservationResult({
+        axTreeText: [
+          '- header',
+          '  - searchbox "Search Amazon" [ref=e1]',
+          '  - link "Deals" [ref=e2]',
+          '  - link "Best Sellers" [ref=e3]',
+          '- text "Deliver to Sweden"',
+        ].join('\n'),
+        debug: {
+          combinedRefMap: {
+            e1: {
+              domId: 'search-input',
+              label: 'Search Amazon',
+              role: 'searchbox',
+              selector: 'input[role="searchbox"]',
+            },
+            e2: { domId: 'deals', label: 'Deals', role: 'link', selector: 'a' },
+            e3: {
+              domId: 'best-sellers',
+              label: 'Best Sellers',
+              role: 'link',
+              selector: 'a',
+            },
+            e4: { domId: 'account', label: 'Sign in', role: 'link', selector: 'a' },
+            e5: { domId: 'cart', label: 'Cart', role: 'link', selector: 'a' },
+            e6: { domId: 'menu', label: 'Menu', role: 'button', selector: 'button' },
+            e7: { domId: 'video', label: 'Video', role: 'link', selector: 'a' },
+            e8: { domId: 'music', label: 'Music', role: 'link', selector: 'a' },
+          },
+          expectedFrameIds: [],
+          frameArtifacts: [],
+          timedOut: false,
+        },
+      }),
+      stepIndex: 1,
+      timestamp: '2026-04-08T00:00:00.000Z',
+      url: 'https://www.amazon.com/',
+    });
+
+    expect(next.phase).toBe('search');
+    expect(next.activeItemId).toBe('todo-start');
+  });
+
+  it('blocks premature finish on results pages when the active todo is still unresolved', () => {
+    const resultsPlan = reduceSessionPlan(createSessionPlan('find a good deal on mens socks'), {
+      type: 'observation',
+      goal: 'find a good deal on mens socks',
+      observation: makeObservationResult({
+        axTreeText: [
+          '- heading "Results" [ref=e1]',
+          '- generic "Best Seller Mens Socks Add to cart" [ref=e2] clickable',
+        ].join('\n'),
+      }),
+      stepIndex: 1,
+      timestamp: '2026-04-08T00:00:00.000Z',
+      url: 'https://www.amazon.com/s?k=mens+socks',
+    });
+
+    const reason = shouldBlockFinishSuccess({
+      goal: 'find a good deal on mens socks',
+      message: 'Found several results for mens socks. I will examine the listed products.',
+      observation: makeObservationResult({
+        axTreeText: [
+          '- heading "Results" [ref=e1]',
+          '- generic "Best Seller Mens Socks Add to cart" [ref=e2] clickable',
+        ].join('\n'),
+      }),
+      plan: resultsPlan,
+    });
+
+    expect(reason).toContain('active todo');
+    expect(reason).toContain('results page');
   });
 
   it('adds and expires avoided refs on a bounded cooldown', () => {

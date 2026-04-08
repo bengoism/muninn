@@ -20,6 +20,9 @@ describe('AgentRuntime prompt contract', () => {
     expect(source).toContain('Avoid for now:');
     expect(source).toContain('"plan_updates"');
     expect(source).toContain('Read the current todo list before each step.');
+    expect(source).toContain(
+      'If the active todo is still to open or inspect a result, do not call finish just because a results page is visible.',
+    );
     expect(source).toContain('The first image is always the current viewport.');
     expect(source).toContain('Why richer context was requested:');
     expect(source).toContain('Use the overview image to understand page layout and off-screen content');

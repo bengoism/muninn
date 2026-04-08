@@ -1,5 +1,6 @@
 import type {
   AgentActionRecord,
+  ObservationResult,
   SessionPlan,
   ToolName,
 } from '../../../types/agent';
@@ -61,4 +62,62 @@ export function shouldGuardSearchboxTarget(
 
   const domId = snapshot.refToDomId.get(targetId) ?? targetId;
   return snapshot.axNodeRoles.get(domId) === 'searchbox';
+}
+
+export function shouldBlockFinishSuccess(args: {
+  goal: string;
+  message: string | null;
+  observation: ObservationResult;
+  plan: SessionPlan | null;
+}): string | null {
+  const { goal, message, observation, plan } = args;
+
+  if (!plan) {
+    return null;
+  }
+
+  const activeItem =
+    plan.items.find((item) => item.id === plan.activeItemId) ?? null;
+  const normalizedMessage = (message ?? '').toLowerCase();
+  const normalizedGoal = goal.toLowerCase();
+  const treeText = observation.axTreeText.toLowerCase();
+
+  const hasFutureIntent =
+    /\b(will|going to|next|then|examine|inspect|compare|review|open|select)\b/.test(
+      normalizedMessage,
+    );
+  const goalNeedsInspection =
+    /\b(good deal|best|cheap|cheapest|compare|review|inspect|shipping|seller|price|buy|purchase|open)\b/.test(
+      normalizedGoal,
+    );
+  const hasVisibleResults =
+    /\bresults\b/.test(treeText) &&
+    /\b(add to cart|sponsored|bought in past month|overall pick|best seller)\b/.test(
+      treeText,
+    );
+
+  if (plan.phase === 'form' || plan.phase === 'search') {
+    return activeItem
+      ? `The active todo "${activeItem.text}" is still unresolved.`
+      : 'The current page still looks like an in-progress search or form step.';
+  }
+
+  if (
+    plan.phase === 'results' &&
+    activeItem?.id === 'todo-results' &&
+    activeItem.status === 'in_progress' &&
+    (hasFutureIntent || goalNeedsInspection || hasVisibleResults)
+  ) {
+    return `The active todo "${activeItem.text}" is still unresolved on a results page.`;
+  }
+
+  if (
+    activeItem &&
+    (activeItem.status === 'pending' || activeItem.status === 'in_progress') &&
+    hasFutureIntent
+  ) {
+    return `The active todo "${activeItem.text}" is still unresolved.`;
+  }
+
+  return null;
 }

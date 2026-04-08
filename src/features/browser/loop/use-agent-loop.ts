@@ -39,6 +39,7 @@ import {
 } from './inference-fallback';
 import {
   hasRepeatedNoOpOnTarget,
+  shouldBlockFinishSuccess,
   shouldGuardSearchboxTarget,
 } from './planning-guards';
 import {
@@ -378,6 +379,51 @@ export function useAgentLoop(
           // ---------------------------------------------------------------
           if (definition?.terminal) {
             const urlNow = useBrowserStore.getState().currentUrl;
+            if (
+              action === 'finish' &&
+              parameters.status === 'success'
+            ) {
+              const finishGuardReason = shouldBlockFinishSuccess({
+                goal,
+                message:
+                  typeof parameters.message === 'string'
+                    ? parameters.message
+                    : null,
+                observation,
+                plan: store.getState().plan,
+              });
+              if (finishGuardReason) {
+                logStep(stepNum, 'guard_finish', {
+                  reason: finishGuardReason,
+                  phase: store.getState().plan?.phase ?? null,
+                  activeItemId: store.getState().plan?.activeItemId ?? null,
+                });
+                chat.addMessage({
+                  type: 'agent_step',
+                  step: stepNum,
+                  action,
+                  params: parameters,
+                  outcome: 'blocked',
+                  reason: finishGuardReason,
+                  urlChanged: false,
+                  timestamp: new Date().toISOString(),
+                });
+                addActionRecord(
+                  toActionRecord(
+                    action,
+                    parameters,
+                    'blocked',
+                    finishGuardReason,
+                    urlNow,
+                    urlNow,
+                  ),
+                );
+                consecutiveNoOps++;
+                reobservesSinceLastProgress++;
+                incrementStep();
+                continue;
+              }
+            }
             const result = await executeTool(action, parameters, browser);
             addActionRecord(
               toActionRecord(action, parameters, result.ok ? 'succeeded' : 'failed', result.reason, urlNow, urlNow),

@@ -21,6 +21,7 @@ final class AgentRuntimePromptBuilder {
 
     IMPORTANT: Elements with [ref=...] are interactive. You MUST use the exact short ref value (e.g. "e1") as the "id" parameter. Never use the element's label, description, or a DOM id like "ai-main-abc-123" as the id.
     If typing into a field has no effect, try clicking or focusing the field, then observe again. If that opens a modal, sheet, fullscreen editor, or expanded picker, retarget the actual active input before typing.
+    If the active todo is still to open or inspect a result, do not call finish just because a results page is visible.
     Read the current todo list before each step. After choosing the next action, you may optionally propose bounded plan updates in a top-level "plan_updates" array. The runtime validates these updates before applying them.
     Allowed plan updates:
     - {"type":"add_item","text":"...", "activate":true|false}
