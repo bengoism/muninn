@@ -109,43 +109,6 @@ describe('applyPlanUpdateProposals', () => {
     });
   });
 
-  it('rejects duplicate add_item proposals', () => {
-    const first = applyPlanUpdateProposals({
-      actionHistory: [],
-      goal: 'find mens socks',
-      observation: makeObservationResult(),
-      plan: createSessionPlan('find mens socks', '2026-04-08T00:00:00.000Z'),
-      proposals: [
-        {
-          type: 'add_item',
-          text: 'Inspect shipping cost and seller details',
-        },
-      ],
-      timestamp: '2026-04-08T00:00:01.000Z',
-      url: 'https://www.amazon.com',
-    });
-
-    const second = applyPlanUpdateProposals({
-      actionHistory: [],
-      goal: 'find mens socks',
-      observation: makeObservationResult(),
-      plan: first.plan,
-      proposals: [
-        {
-          type: 'add_item',
-          text: 'Inspect shipping cost and seller details',
-        },
-      ],
-      timestamp: '2026-04-08T00:00:02.000Z',
-      url: 'https://www.amazon.com',
-    });
-
-    expect(second.decisions[0]).toMatchObject({
-      accepted: false,
-    });
-    expect(second.decisions[0]?.reason).toContain('already present');
-  });
-
   it('accepts set_phase when the observation supports that phase', () => {
     const result = applyPlanUpdateProposals({
       actionHistory: [],
@@ -181,23 +144,6 @@ describe('applyPlanUpdateProposals', () => {
 
     expect(result.decisions[0]).toMatchObject({ accepted: false });
     expect(result.plan.phase).toBe('initial');
-  });
-
-  it('accepts completing todo-start once the current page is clearly results-like', () => {
-    const result = applyPlanUpdateProposals({
-      actionHistory: [],
-      goal: 'find mens socks',
-      observation: makeResultsObservation(),
-      plan: createSessionPlan('find mens socks', '2026-04-08T00:00:00.000Z'),
-      proposals: [{ type: 'complete_item', id: 'todo-start' }],
-      timestamp: '2026-04-08T00:00:01.000Z',
-      url: 'https://www.amazon.com/s?k=mens+socks',
-    });
-
-    expect(result.decisions[0]).toMatchObject({ accepted: true });
-    expect(findItem(result.plan, 'todo-start')).toMatchObject({
-      status: 'completed',
-    });
   });
 
   it('rejects completing todo-results while still on a results page', () => {

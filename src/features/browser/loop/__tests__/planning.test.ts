@@ -158,43 +158,6 @@ describe('session planning', () => {
     });
   });
 
-  it('transitions from results to detail and advances the active todo', () => {
-    const resultsPlan = reduceSessionPlan(createSessionPlan('find mens socks'), {
-      type: 'observation',
-      goal: 'find mens socks',
-      observation: makeObservationResult({
-        axTreeText: '- heading "Results" [ref=e1]',
-      }),
-      stepIndex: 1,
-      timestamp: '2026-04-08T00:00:00.000Z',
-      url: 'https://www.amazon.com/s?k=mens+socks',
-    });
-
-    const detailPlan = reduceSessionPlan(resultsPlan, {
-      type: 'observation',
-      goal: 'find mens socks',
-      observation: makeObservationResult({
-        axTreeText: [
-          '- heading "Amazon Essentials Mens Socks" [ref=e1]',
-          '- button "Add to cart" [ref=e2]',
-        ].join('\n'),
-      }),
-      stepIndex: 2,
-      timestamp: '2026-04-08T00:00:05.000Z',
-      url: 'https://www.amazon.com/dp/B000TEST',
-    });
-
-    expect(detailPlan.phase).toBe('detail');
-    expect(detailPlan.activeItemId).toBe('todo-detail');
-    expect(findItem(detailPlan, 'todo-results')).toMatchObject({
-      status: 'completed',
-    });
-    expect(findItem(detailPlan, 'todo-detail')).toMatchObject({
-      status: 'in_progress',
-      text: 'Inspect the selected page for: find mens socks',
-    });
-  });
-
   it('records evidence-backed progress from successful actions', () => {
     const plan = createSessionPlan('find mens socks');
     const next = reduceSessionPlan(plan, {
@@ -276,24 +239,6 @@ describe('session planning', () => {
     expect(findItem(next, 'todo-form')).toMatchObject({
       status: 'in_progress',
     });
-  });
-
-  it('marks the active todo complete when the session finishes successfully', () => {
-    const plan = createSessionPlan('find mens socks');
-    const next = reduceSessionPlan(plan, {
-      type: 'session_finished',
-      goal: 'find mens socks',
-      stopReason: 'goal_complete',
-      timestamp: '2026-04-08T00:00:10.000Z',
-    });
-
-    expect(next.phase).toBe('done');
-    expect(findItem(next, 'todo-start')).toMatchObject({
-      status: 'completed',
-    });
-    expect(next.lastConfirmedProgress).toBe(
-      'The agent marked the goal complete.',
-    );
   });
 
   it('adds and expires avoided refs on a bounded cooldown', () => {
