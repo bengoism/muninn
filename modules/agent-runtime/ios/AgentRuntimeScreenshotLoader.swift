@@ -28,12 +28,13 @@ final class AgentRuntimeScreenshotLoader {
       )
     }
 
-    let resized = Self.resize(image, maxDimension: Self.maxDimension)
+    let resized = Self.normalizeForModel(image, maxDimension: Self.maxDimension)
+    let encodedImage = Self.encodeForModel(resized)
 
-    guard let jpegData = resized.jpegData(compressionQuality: Self.jpegQuality) else {
+    guard let imageData = encodedImage?.data else {
       throw AgentRuntimeFailure(
         code: .screenshotLoadFailed,
-        message: "Could not encode resized screenshot as JPEG.",
+        message: "Could not encode resized screenshot for model inference.",
         details: [
           "path": url.path
         ],
@@ -42,9 +43,11 @@ final class AgentRuntimeScreenshotLoader {
     }
 
     let resizedUrl = URL(fileURLWithPath: NSTemporaryDirectory())
-      .appendingPathComponent("muninn-screenshot-resized-\(UUID().uuidString).jpg")
+      .appendingPathComponent(
+        "muninn-screenshot-resized-\(UUID().uuidString).\(encodedImage?.fileExtension ?? "jpg")"
+      )
 
-    try jpegData.write(to: resizedUrl, options: [.atomic])
+    try imageData.write(to: resizedUrl, options: [.atomic])
 
     let pixelWidth = Int(round(resized.size.width * resized.scale))
     let pixelHeight = Int(round(resized.size.height * resized.scale))
@@ -56,24 +59,53 @@ final class AgentRuntimeScreenshotLoader {
     )
   }
 
-  private static func resize(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+  private static func normalizeForModel(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
     let originalWidth = image.size.width
     let originalHeight = image.size.height
     let longestEdge = max(originalWidth, originalHeight)
 
-    guard longestEdge > maxDimension else {
-      return image
+    let targetSize: CGSize
+
+    if longestEdge > maxDimension {
+      let scale = maxDimension / longestEdge
+      targetSize = CGSize(
+        width: round(originalWidth * scale),
+        height: round(originalHeight * scale)
+      )
+    } else {
+      targetSize = CGSize(width: originalWidth, height: originalHeight)
     }
 
-    let scale = maxDimension / longestEdge
-    let newSize = CGSize(
-      width: round(originalWidth * scale),
-      height: round(originalHeight * scale)
-    )
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
 
-    let renderer = UIGraphicsImageRenderer(size: newSize)
+    if #available(iOS 12.0, *) {
+      format.preferredRange = .standard
+    }
+
+    let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
     return renderer.image { _ in
-      image.draw(in: CGRect(origin: .zero, size: newSize))
+      UIColor.white.setFill()
+      UIRectFill(CGRect(origin: .zero, size: targetSize))
+      image.draw(in: CGRect(origin: .zero, size: targetSize))
     }
   }
+
+  private static func encodeForModel(_ image: UIImage) -> EncodedImage? {
+    if let jpegData = image.jpegData(compressionQuality: Self.jpegQuality) {
+      return EncodedImage(data: jpegData, fileExtension: "jpg")
+    }
+
+    if let pngData = image.pngData() {
+      return EncodedImage(data: pngData, fileExtension: "png")
+    }
+
+    return nil
+  }
+}
+
+private struct EncodedImage {
+  let data: Data
+  let fileExtension: String
 }

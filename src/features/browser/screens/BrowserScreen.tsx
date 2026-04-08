@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -19,32 +18,41 @@ import {
   downloadModel,
   getModelStatus,
   listAvailableModels,
-  runInference,
   runLiteRTLMSmokeTest,
 } from '../../../native/agent-runtime';
 import { BottomPanel } from '../components/BottomPanel';
-import { GoalBar } from '../components/GoalBar';
 import { useAgentLoop } from '../loop/use-agent-loop';
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useBrowserStore } from '../../../state/browser-store';
+import { useDebugStore } from '../../../state/debug-store';
 import type {
   InferenceResponse,
   LiteRTLMSmokeTestResponse,
   ModelCatalogEntry,
   ModelStatus,
   ObservationResult,
+  PlanningContextDebugRequest,
   RuntimeMode,
+  SessionPlan,
 } from '../../../types/agent';
 import { BrowserChrome } from '../components/BrowserChrome';
 import {
   BrowserWebView,
   type BrowserWebViewHandle,
 } from '../components/BrowserWebView';
+import type {
+  ActionDebugTrace,
+  LocatorProbeTrace,
+} from '../debug/types';
 import { BRIDGE_FIXTURE_URL } from '../fixtures/bridge-fixture';
+import { probeLocator } from '../tools/executor';
 import type {
   BrowserBridgeMessage,
   BrowserBridgeParseError,
+  BrowserConsoleMessage,
   BrowserEvaluationResult,
+  BrowserNetworkSummaryMessage,
+  BrowserPageEventMessage,
 } from '../types';
 
 export function BrowserScreen() {
@@ -95,15 +103,29 @@ export function BrowserScreen() {
     (state) => state.lastNativeResponse
   );
   const lastAgentError = useAgentSessionStore((state) => state.lastError);
+  const lastPlanningContextRequest = useAgentSessionStore(
+    (state) => state.lastPlanningContextRequest
+  );
+  const sessionPlan = useAgentSessionStore((state) => state.plan);
   const setGoal = useAgentSessionStore((state) => state.setGoal);
   const setLoopState = useAgentSessionStore((state) => state.setLoopState);
-  const setLastNativeResponse = useAgentSessionStore(
-    (state) => state.setLastNativeResponse
-  );
-  const setLastAgentError = useAgentSessionStore((state) => state.setLastError);
+  const actionTraces = useDebugStore((state) => state.actionTraces);
+  const captureRaw = useDebugStore((state) => state.captureRaw);
+  const consoleMessages = useDebugStore((state) => state.consoleMessages);
+  const lastDebugObservation = useDebugStore((state) => state.lastObservation);
+  const lastLocatorProbe = useDebugStore((state) => state.lastLocatorProbe);
+  const networkEvents = useDebugStore((state) => state.networkEvents);
+  const pageEvents = useDebugStore((state) => state.pageEvents);
+  const pushConsoleMessage = useDebugStore((state) => state.pushConsoleMessage);
+  const pushNetworkEvent = useDebugStore((state) => state.pushNetworkEvent);
+  const pushPageEvent = useDebugStore((state) => state.pushPageEvent);
+  const setCaptureRaw = useDebugStore((state) => state.setCaptureRaw);
+  const setDebugObservation = useDebugStore((state) => state.setLastObservation);
+  const setLastLocatorProbe = useDebugStore((state) => state.setLastLocatorProbe);
 
   const [isRunningEvaluation, setIsRunningEvaluation] = useState(false);
   const [isRunningObservation, setIsRunningObservation] = useState(false);
+  const [isResolvingLocator, setIsResolvingLocator] = useState(false);
   const [lastEvaluationResult, setLastEvaluationResult] =
     useState<BrowserEvaluationResult | null>(null);
   const [lastObservationResult, setLastObservationResult] =
@@ -124,6 +146,7 @@ export function BrowserScreen() {
     DEFAULT_AGENT_RUNTIME_MODE
   );
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [locatorProbeTarget, setLocatorProbeTarget] = useState('');
 
   const agentLoop = useAgentLoop(browserRef, runtimeMode);
   const stepCount = useAgentSessionStore((state) => state.stepCount);
@@ -138,6 +161,8 @@ export function BrowserScreen() {
     () => availableModels.some((model) => model.downloaded),
     [availableModels]
   );
+  const latestObservation = lastDebugObservation ?? lastObservationResult;
+  const latestActionTrace = actionTraces[actionTraces.length - 1] ?? null;
 
   const refreshModelDiagnostics = useCallback(async () => {
     if (modelDiagnosticsRefreshInFlightRef.current) {
@@ -252,6 +277,8 @@ export function BrowserScreen() {
     setNavigationError(null);
     setLastObservationError(null);
     setLastObservationResult(null);
+    setDebugObservation(null);
+    setLastLocatorProbe(null);
     setTelemetryProtocolError(null);
     clearTelemetryState();
   };
@@ -262,13 +289,16 @@ export function BrowserScreen() {
       setLastObservationError(null);
       setLoopState('observing');
 
-      const result = await browserRef.current?.observe();
+      const result = await browserRef.current?.observe({
+        includeFullPageScreenshot: captureRaw,
+      });
 
       if (!result) {
         throw new Error('Browser host ref was unavailable.');
       }
 
       setLastObservationResult(result);
+      setDebugObservation(result);
       setLoopState('idle');
     } catch (error) {
       setLastObservationError(
@@ -278,10 +308,17 @@ export function BrowserScreen() {
     } finally {
       setIsRunningObservation(false);
     }
-  }, [setLoopState]);
+  }, [browserRef, captureRaw, setDebugObservation, setLoopState]);
 
   const handleTelemetryMessage = (message: BrowserBridgeMessage) => {
     registerTelemetryMessage(message);
+    if (message.kind === 'console_message') {
+      pushConsoleMessage(message);
+    } else if (message.kind === 'network_summary') {
+      pushNetworkEvent(message);
+    } else if (message.kind === 'page_event') {
+      pushPageEvent(message);
+    }
   };
 
   const handleTelemetryProtocolError = (error: BrowserBridgeParseError) => {
@@ -312,6 +349,24 @@ export function BrowserScreen() {
     requestedUrl,
     telemetryReady,
   ]);
+
+  const handleProbeLocator = useCallback(async () => {
+    if (!locatorProbeTarget.trim() || !browserRef.current) {
+      return;
+    }
+
+    try {
+      setIsResolvingLocator(true);
+      const result = await probeLocator(
+        browserRef.current,
+        locatorProbeTarget.trim(),
+        captureRaw
+      );
+      setLastLocatorProbe(result);
+    } finally {
+      setIsResolvingLocator(false);
+    }
+  }, [browserRef, captureRaw, locatorProbeTarget, setLastLocatorProbe]);
 
   useEffect(() => {
     void refreshModelDiagnostics();
@@ -497,29 +552,38 @@ export function BrowserScreen() {
               meta={formatObservationMetricMeta({
                 isRunningObservation,
                 lastObservationError,
-                lastObservationResult,
+                lastObservationResult: latestObservation,
               })}
               value={formatObservationMetricValue({
                 isRunningObservation,
                 lastObservationError,
-                lastObservationResult,
+                lastObservationResult: latestObservation,
               })}
             />
             <SummaryCard
               label="Quiescence"
-              meta={formatQuiescenceMetricMeta(lastObservationResult)}
-              value={formatQuiescenceMetricValue(lastObservationResult)}
+              meta={formatQuiescenceMetricMeta(latestObservation)}
+              value={formatQuiescenceMetricValue(latestObservation)}
             />
             <SummaryCard
               label="Telemetry"
               meta={`${frames.length} frame(s) tracked`}
               value={telemetryReady ? 'Active' : 'Pending'}
             />
+            <SummaryCard
+              label="Plan"
+              meta={formatPlanMetricMeta(sessionPlan)}
+              value={formatPlanMetricValue(sessionPlan)}
+            />
           </View>
 
           <StatusCard
             label="Latest observation"
-            value={formatObservationSummary(lastObservationResult)}
+            value={formatObservationSummary(latestObservation)}
+          />
+          <StatusCard
+            label="Session plan"
+            value={formatSessionPlan(sessionPlan)}
           />
 
           <Pressable
@@ -588,6 +652,38 @@ export function BrowserScreen() {
                     tone="secondary"
                     wide
                   />
+                  <DebugButton
+                    label={captureRaw ? 'Raw capture on' : 'Raw capture off'}
+                    onPress={() => setCaptureRaw(!captureRaw)}
+                    tone={captureRaw ? 'primary' : 'quiet'}
+                    wide
+                  />
+                </View>
+              </View>
+              <View style={styles.statusCard}>
+                <Text style={styles.statusCardLabel}>Locator Probe</Text>
+                <Text style={styles.sectionCaption}>
+                  Resolve a ref without acting on it to see each locator
+                  strategy and the best near-misses.
+                </Text>
+                <TextInput
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onChangeText={setLocatorProbeTarget}
+                  placeholder="Enter a ref like e1"
+                  placeholderTextColor="#64748b"
+                  style={styles.goalInput}
+                  value={locatorProbeTarget}
+                />
+                <View style={styles.buttonRow}>
+                  <DebugButton
+                    disabled={isResolvingLocator || !locatorProbeTarget.trim()}
+                    label={
+                      isResolvingLocator ? 'Resolving target...' : 'Resolve target'
+                    }
+                    onPress={handleProbeLocator}
+                    tone="primary"
+                  />
                 </View>
               </View>
               <StatusCard
@@ -623,11 +719,55 @@ export function BrowserScreen() {
               />
               <StatusCard
                 label="Observation screenshot"
-                value={lastObservationResult?.screenshot.uri ?? 'None'}
+                value={latestObservation?.screenshot.uri ?? 'None'}
+              />
+              <StatusCard
+                label="Observation full-page screenshot"
+                value={formatObservationFullPageScreenshot(latestObservation)}
+              />
+              <StatusCard
+                label="Last planning context request"
+                value={formatPlanningContextRequest(lastPlanningContextRequest)}
               />
               <StatusCard
                 label="Observation warnings"
-                value={formatObservationWarnings(lastObservationResult)}
+                value={formatObservationWarnings(latestObservation)}
+              />
+              <StatusCard
+                label="Observation refs"
+                value={formatObservationRefs(latestObservation)}
+              />
+              <StatusCard
+                label="Observation frames"
+                value={formatObservationFrames(latestObservation)}
+              />
+              <StatusCard
+                label="Latest locator probe"
+                value={formatLocatorProbe(lastLocatorProbe)}
+              />
+              <StatusCard
+                label="Latest action trace"
+                value={formatActionTrace(latestActionTrace)}
+              />
+              <StatusCard
+                label="Plan notes"
+                value={formatPlanNotes(sessionPlan)}
+              />
+              <StatusCard
+                label="Last model plan updates"
+                value={formatLastModelPlanUpdates(lastNativeResponse)}
+              />
+              <StatusCard
+                label="Recent page events"
+                value={formatPageEvents(pageEvents)}
+              />
+              <StatusCard
+                label="Recent console messages"
+                value={formatConsoleMessages(consoleMessages)}
+              />
+              <StatusCard
+                label="Recent network events"
+                value={formatNetworkEvents(networkEvents)}
               />
               <StatusCard
                 label="Last observation error"
@@ -772,8 +912,13 @@ function formatObservationSummary(result: ObservationResult | null) {
     `${result.axSnapshot.length} node(s)`,
     `${result.frameSnapshots.length} frame(s)`,
     `${result.screenshot.width}x${result.screenshot.height} px`,
+    result.fullPageScreenshot
+      ? `full page ${result.fullPageScreenshot.width}x${result.fullPageScreenshot.height} px`
+      : null,
     `quiescence ${result.quiescence.waitTimeMs} ms`,
-  ].join(' | ');
+  ]
+    .filter(Boolean)
+    .join(' | ');
 }
 
 function formatObservationWarnings(result: ObservationResult | null) {
@@ -782,6 +927,266 @@ function formatObservationWarnings(result: ObservationResult | null) {
   }
 
   return result.warnings.join('\n');
+}
+
+function formatObservationFullPageScreenshot(result: ObservationResult | null) {
+  if (!result?.fullPageScreenshot) {
+    return 'None';
+  }
+
+  const screenshot = result.fullPageScreenshot;
+  return [
+    screenshot.uri,
+    `${screenshot.width}x${screenshot.height} px`,
+    `tiles=${screenshot.tileCount}`,
+    `viewport=(${Math.round(screenshot.viewportOriginX)}, ${Math.round(
+      screenshot.viewportOriginY
+    )}) ${Math.round(screenshot.viewportPointWidth)}x${Math.round(
+      screenshot.viewportPointHeight
+    )} pt`,
+  ].join('\n');
+}
+
+function formatObservationRefs(result: ObservationResult | null) {
+  if (!result) {
+    return 'None';
+  }
+
+  const entries = Object.entries(result.debug.combinedRefMap);
+  if (entries.length === 0) {
+    return 'None';
+  }
+
+  const lines = entries.slice(0, 20).map(([refId, entry]) =>
+    [
+      refId,
+      `role=${entry.role}`,
+      `domId=${entry.domId}`,
+      entry.label ? `label=${entry.label}` : null,
+      `selector=${entry.selector}`,
+    ]
+      .filter(Boolean)
+      .join(' | ')
+  );
+
+  if (entries.length > 20) {
+    lines.push(`... ${entries.length - 20} more ref(s)`);
+  }
+
+  return lines.join('\n');
+}
+
+function formatObservationFrames(result: ObservationResult | null) {
+  if (!result) {
+    return 'None';
+  }
+
+  return result.debug.frameArtifacts
+    .map((frame) =>
+      [
+        frame.frameId,
+        frame.frameUrl ?? 'No URL',
+        `top=${frame.isTopFrame ? 'yes' : 'no'}`,
+        `nodes=${frame.nodeCount}`,
+        `refs=${frame.refIds.length}`,
+        frame.error ? `error=${frame.error}` : null,
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    )
+    .join('\n');
+}
+
+function formatResolverTrace(
+  trace: NonNullable<LocatorProbeTrace['debug']>['resolver'] | null
+) {
+  if (!trace) {
+    return 'resolver=None';
+  }
+
+  const lines = [
+    [
+      `target=${trace.targetId}`,
+      `kind=${trace.targetKind}`,
+      `state=${trace.targetState}`,
+    ].join(' | '),
+  ];
+
+  if (trace.refEntry) {
+    lines.push(
+      [
+        `ref.domId=${trace.refEntry.domId}`,
+        `ref.role=${trace.refEntry.role}`,
+        `ref.selector=${trace.refEntry.selector}`,
+        trace.refEntry.label ? `ref.label=${trace.refEntry.label}` : null,
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    );
+  }
+
+  trace.attempts.forEach((attempt) => {
+    lines.push(
+      [
+        attempt.strategy,
+        `matched=${attempt.matched ? 'yes' : 'no'}`,
+        `candidates=${attempt.candidateCount}`,
+        attempt.reason ? `reason=${attempt.reason}` : null,
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    );
+  });
+
+  if (trace.matchedCandidate) {
+    lines.push(
+      [
+        'matched',
+        trace.matchedCandidate.tagName,
+        trace.matchedCandidate.role
+          ? `role=${trace.matchedCandidate.role}`
+          : null,
+        trace.matchedCandidate.domId
+          ? `domId=${trace.matchedCandidate.domId}`
+          : null,
+        trace.matchedCandidate.label
+          ? `label=${trace.matchedCandidate.label}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function formatLocatorProbe(probe: LocatorProbeTrace | null) {
+  if (!probe) {
+    return 'Not run';
+  }
+
+  return [
+    `ok=${probe.ok ? 'yes' : 'no'}`,
+    `reason=${probe.reason ?? 'None'}`,
+    formatResolverTrace(probe.debug?.resolver ?? null),
+  ].join('\n');
+}
+
+function formatActionTrace(trace: ActionDebugTrace | null) {
+  if (!trace) {
+    return 'None';
+  }
+
+  const lines = [
+    [
+      `step=${trace.step}`,
+      `action=${trace.action}`,
+      `targetState=${trace.targetState ?? 'None'}`,
+    ].join(' | '),
+    `params=${formatValue(trace.parameters)}`,
+    trace.preSnapshot
+      ? [
+          'pre',
+          `url=${trace.preSnapshot.url ?? 'None'}`,
+          `nodes=${trace.preSnapshot.axNodeCount}`,
+          `liveRefs=${trace.preSnapshot.liveRefCount}`,
+          `focusRef=${trace.preSnapshot.activeShortRef ?? 'None'}`,
+        ].join(' | ')
+      : 'pre=None',
+    trace.executor
+      ? [
+          'executor',
+          `ok=${trace.executor.ok ? 'yes' : 'no'}`,
+          `reason=${trace.executor.reason ?? 'None'}`,
+          `durationMs=${trace.executor.durationMs}`,
+        ].join(' | ')
+      : 'executor=None',
+    trace.validation
+      ? [
+          'validation',
+          `outcome=${trace.validation.outcome}`,
+          `reason=${trace.validation.reason ?? 'None'}`,
+          `signals=${formatValue(trace.validation.signals)}`,
+        ].join(' | ')
+      : 'validation=None',
+    formatResolverTrace(trace.executor?.debug?.resolver ?? null),
+  ];
+
+  if (trace.retry) {
+    lines.push(
+      [
+        'retry',
+        `action=${trace.retry.action}`,
+        `ok=${trace.retry.executor.ok ? 'yes' : 'no'}`,
+        `reason=${trace.retry.executor.reason ?? 'None'}`,
+        `outcome=${trace.retry.validation.outcome}`,
+      ].join(' | ')
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function formatPageEvents(events: BrowserPageEventMessage[]) {
+  if (events.length === 0) {
+    return 'None';
+  }
+
+  return events
+    .slice(-8)
+    .map((event) =>
+      [
+        event.timestamp,
+        event.payload.event,
+        formatValue(event.payload.detail),
+      ].join(' | ')
+    )
+    .join('\n');
+}
+
+function formatConsoleMessages(messages: BrowserConsoleMessage[]) {
+  if (messages.length === 0) {
+    return 'None';
+  }
+
+  return messages
+    .slice(-8)
+    .map((message) =>
+      [
+        message.timestamp,
+        message.payload.level,
+        message.payload.args.map((arg) => formatValue(arg)).join(' '),
+      ].join(' | ')
+    )
+    .join('\n');
+}
+
+function formatNetworkEvents(messages: BrowserNetworkSummaryMessage[]) {
+  if (messages.length === 0) {
+    return 'None';
+  }
+
+  return messages
+    .slice(-10)
+    .map((message) =>
+      [
+        message.timestamp,
+        `${message.payload.transport}:${message.payload.phase}`,
+        message.payload.method,
+        message.payload.url,
+        message.payload.statusCode !== null
+          ? `status=${message.payload.statusCode}`
+          : null,
+        message.payload.durationMs !== null
+          ? `durationMs=${message.payload.durationMs}`
+          : null,
+        message.payload.error ? `error=${message.payload.error}` : null,
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    )
+    .join('\n');
 }
 
 function formatLoopState(loopState: string) {
@@ -849,6 +1254,103 @@ function formatQuiescenceMetricMeta(result: ObservationResult | null) {
 
 function formatRuntimeModeLabel(runtimeMode: RuntimeMode) {
   return runtimeMode === 'litertlm' ? 'LiteRT-LM' : 'Replay';
+}
+
+function formatPlanMetricValue(plan: SessionPlan | null) {
+  if (!plan) {
+    return 'Not started';
+  }
+
+  return formatLoopState(plan.phase);
+}
+
+function formatPlanMetricMeta(plan: SessionPlan | null) {
+  if (!plan) {
+    return 'No active todo';
+  }
+
+  const activeItem =
+    plan.items.find((item) => item.id === plan.activeItemId) ?? null;
+  if (!activeItem) {
+    return 'No active todo';
+  }
+
+  return activeItem.text;
+}
+
+function formatSessionPlan(plan: SessionPlan | null) {
+  if (!plan) {
+    return 'None';
+  }
+
+  const activeItem =
+    plan.items.find((item) => item.id === plan.activeItemId) ?? null;
+  const lines = [
+    `phase=${plan.phase}`,
+    `active=${activeItem ? activeItem.text : 'None'}`,
+    `lastConfirmedProgress=${plan.lastConfirmedProgress ?? 'None'}`,
+    'items:',
+    ...plan.items.map((item) =>
+      [
+        `- ${item.id}`,
+        `[${item.status}]`,
+        item.text,
+        item.evidence ? `(evidence: ${item.evidence})` : null,
+      ]
+        .filter(Boolean)
+        .join(' ')
+    ),
+    plan.avoidRefs.length > 0 ? 'avoidRefs:' : 'avoidRefs=None',
+    ...plan.avoidRefs.map((entry) =>
+      `- ${entry.ref} until step ${entry.expiresAfterStep}: ${entry.reason}`
+    ),
+  ];
+
+  return lines.join('\n');
+}
+
+function formatPlanNotes(plan: SessionPlan | null) {
+  if (!plan || plan.notes.length === 0) {
+    return 'None';
+  }
+
+  return plan.notes.join('\n');
+}
+
+function formatLastModelPlanUpdates(response: InferenceResponse | null) {
+  if (!response || !response.ok) {
+    return 'None';
+  }
+
+  if (!Array.isArray(response.planUpdates) || response.planUpdates.length === 0) {
+    return 'None';
+  }
+
+  return response.planUpdates
+    .map((update) => JSON.stringify(update))
+    .join('\n');
+}
+
+function formatPlanningContextRequest(
+  request: PlanningContextDebugRequest | null
+) {
+  if (!request) {
+    return 'None';
+  }
+
+  const lines = [
+    `step=${request.step}`,
+    `source=${request.source}`,
+    `url=${request.url ?? 'None'}`,
+    `fullPageCaptured=${request.fullPageCaptured ? 'yes' : 'no'}`,
+    `reasons=${
+      request.reasons.length > 0 ? request.reasons.join(', ') : 'debug-only'
+    }`,
+    `summary=${request.summary}`,
+    `fullPageScreenshotUri=${request.fullPageScreenshotUri ?? 'None'}`,
+  ];
+
+  return lines.join('\n');
 }
 
 function formatRuntimeModeStatus(
@@ -1033,22 +1535,6 @@ function formatBytes(bytes: number) {
 
   const digits = unitIndex === 0 ? 0 : 1;
   return `${value.toFixed(digits)} ${units[unitIndex]}`;
-}
-
-function mapResponseToLoopState(response: InferenceResponse) {
-  if (!response.ok) {
-    return 'failed' as const;
-  }
-
-  if (response.action === 'yield_to_user') {
-    return 'yielded' as const;
-  }
-
-  if (response.action === 'finish') {
-    return 'finished' as const;
-  }
-
-  return 'acting' as const;
 }
 
 const styles = StyleSheet.create({

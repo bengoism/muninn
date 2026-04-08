@@ -116,6 +116,85 @@ export function buildBridgeBootstrapScript() {
     return new Date().toISOString();
   }
 
+  function limitString(value, maxLength) {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    if (value.length <= maxLength) {
+      return value;
+    }
+
+    return value.slice(0, maxLength) + '...';
+  }
+
+  function buildNetworkRequestId(prefix) {
+    runtime.networkSequence += 1;
+    return prefix + '-' + getFrameId() + '-' + runtime.networkSequence.toString(36);
+  }
+
+  function serializeConsoleArg(value) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return value;
+    }
+
+    if (
+      typeof Element !== 'undefined' &&
+      value instanceof Element
+    ) {
+      return {
+        type: 'element',
+        tagName: value.tagName ? value.tagName.toLowerCase() : null,
+        id: normalizeString(value.getAttribute('id')),
+        role: normalizeString(value.getAttribute('role')),
+        text: limitString(
+          normalizeString(value.innerText || value.textContent || ''),
+          160
+        ),
+      };
+    }
+
+    if (value instanceof Error) {
+      return {
+        type: 'error',
+        name: value.name || 'Error',
+        message: value.message || 'Unknown error.',
+        stack: limitString(value.stack || '', 500),
+      };
+    }
+
+    try {
+      return {
+        type: Array.isArray(value) ? 'array' : 'object',
+        value: limitString(JSON.stringify(value), 400),
+      };
+    } catch (error) {
+      return {
+        type: 'string',
+        value: limitString(String(value), 400),
+      };
+    }
+  }
+
+  function emitConsoleMessage(level, args) {
+    post('console_message', {
+      level: level,
+      args: args.map(serializeConsoleArg),
+    });
+  }
+
+  function emitNetworkSummary(summary) {
+    post('network_summary', summary);
+  }
+
   function getFrame() {
     return {
       frameId: getFrameId(),
@@ -162,6 +241,10 @@ export function buildBridgeBootstrapScript() {
   runtime.nodeSequence =
     typeof runtime.nodeSequence === 'number' && isFinite(runtime.nodeSequence)
       ? runtime.nodeSequence
+      : 0;
+  runtime.networkSequence =
+    typeof runtime.networkSequence === 'number' && isFinite(runtime.networkSequence)
+      ? runtime.networkSequence
       : 0;
 
   function emitObservationState(reason) {
@@ -924,15 +1007,63 @@ export function buildBridgeBootstrapScript() {
 
     const originalFetch = window.fetch.bind(window);
     const wrappedFetch = function () {
+      const input = arguments[0];
+      const init = arguments[1];
+      const requestId = buildNetworkRequestId('fetch');
+      const startedAt = Date.now();
+      const method =
+        (init && typeof init.method === 'string' && init.method) ||
+        (input && typeof input === 'object' && typeof input.method === 'string' && input.method) ||
+        'GET';
+      const url =
+        typeof input === 'string'
+          ? input
+          : input && typeof input === 'object' && typeof input.url === 'string'
+            ? input.url
+            : String(input);
+
       incrementPending('fetch-start');
+      emitNetworkSummary({
+        durationMs: null,
+        error: null,
+        method: method,
+        phase: 'started',
+        requestId: requestId,
+        statusCode: null,
+        transport: 'fetch',
+        url: url,
+      });
 
       return originalFetch.apply(this, arguments).then(
         function (response) {
           decrementPending('fetch-end');
+          emitNetworkSummary({
+            durationMs: Date.now() - startedAt,
+            error: null,
+            method: method,
+            phase: 'completed',
+            requestId: requestId,
+            statusCode: response && typeof response.status === 'number' ? response.status : null,
+            transport: 'fetch',
+            url: url,
+          });
           return response;
         },
         function (error) {
           decrementPending('fetch-error');
+          emitNetworkSummary({
+            durationMs: Date.now() - startedAt,
+            error:
+              error && typeof error === 'object' && typeof error.message === 'string'
+                ? error.message
+                : 'Fetch failed.',
+            method: method,
+            phase: 'failed',
+            requestId: requestId,
+            statusCode: null,
+            transport: 'fetch',
+            url: url,
+          });
           throw error;
         }
       );
@@ -947,11 +1078,36 @@ export function buildBridgeBootstrapScript() {
       return;
     }
 
+    const originalOpen = window.XMLHttpRequest.prototype.open;
     const originalSend = window.XMLHttpRequest.prototype.send;
+    window.XMLHttpRequest.prototype.open = function (method, url) {
+      this.__muninnMethod = typeof method === 'string' ? method : 'GET';
+      this.__muninnUrl = typeof url === 'string' ? url : String(url);
+      return originalOpen.apply(this, arguments);
+    };
+
     window.XMLHttpRequest.prototype.send = function () {
       const request = this;
       let completed = false;
+      const requestId = buildNetworkRequestId('xhr');
+      const startedAt = Date.now();
+      const method =
+        typeof request.__muninnMethod === 'string' ? request.__muninnMethod : 'GET';
+      const url =
+        typeof request.__muninnUrl === 'string'
+          ? request.__muninnUrl
+          : window.location.href;
       incrementPending('xhr-start');
+      emitNetworkSummary({
+        durationMs: null,
+        error: null,
+        method: method,
+        phase: 'started',
+        requestId: requestId,
+        statusCode: null,
+        transport: 'xhr',
+        url: url,
+      });
 
       const complete = function () {
         if (completed) {
@@ -964,17 +1120,66 @@ export function buildBridgeBootstrapScript() {
         request.removeEventListener('abort', complete);
         request.removeEventListener('timeout', complete);
         decrementPending('xhr-end');
+        emitNetworkSummary({
+          durationMs: Date.now() - startedAt,
+          error: null,
+          method: method,
+          phase: 'completed',
+          requestId: requestId,
+          statusCode: typeof request.status === 'number' ? request.status : null,
+          transport: 'xhr',
+          url: url,
+        });
+      };
+
+      const fail = function (message) {
+        if (completed) {
+          return;
+        }
+
+        completed = true;
+        request.removeEventListener('loadend', complete);
+        request.removeEventListener('error', onError);
+        request.removeEventListener('abort', onAbort);
+        request.removeEventListener('timeout', onTimeout);
+        decrementPending('xhr-end');
+        emitNetworkSummary({
+          durationMs: Date.now() - startedAt,
+          error: message,
+          method: method,
+          phase: 'failed',
+          requestId: requestId,
+          statusCode: typeof request.status === 'number' ? request.status : null,
+          transport: 'xhr',
+          url: url,
+        });
+      };
+
+      const onError = function () {
+        fail('XHR error.');
+      };
+
+      const onAbort = function () {
+        fail('XHR aborted.');
+      };
+
+      const onTimeout = function () {
+        fail('XHR timed out.');
       };
 
       request.addEventListener('loadend', complete);
-      request.addEventListener('error', complete);
-      request.addEventListener('abort', complete);
-      request.addEventListener('timeout', complete);
+      request.addEventListener('error', onError);
+      request.addEventListener('abort', onAbort);
+      request.addEventListener('timeout', onTimeout);
 
       try {
         return originalSend.apply(request, arguments);
       } catch (error) {
-        complete();
+        fail(
+          error && typeof error === 'object' && typeof error.message === 'string'
+            ? error.message
+            : 'XHR send failed.'
+        );
         throw error;
       }
     };
@@ -988,13 +1193,45 @@ export function buildBridgeBootstrapScript() {
     }
 
     const originalSendBeacon = navigator.sendBeacon.bind(navigator);
-    const wrappedSendBeacon = function () {
+    const wrappedSendBeacon = function (url) {
       markActivity('sendBeacon');
+      emitNetworkSummary({
+        durationMs: null,
+        error: null,
+        method: 'POST',
+        phase: 'send_beacon',
+        requestId: buildNetworkRequestId('beacon'),
+        statusCode: null,
+        transport: 'beacon',
+        url: typeof url === 'string' ? url : String(url),
+      });
       return originalSendBeacon.apply(this, arguments);
     };
 
     wrappedSendBeacon.__muninnWrapped = true;
     navigator.sendBeacon = wrappedSendBeacon;
+  }
+
+  function patchConsole() {
+    if (!window.console || window.console.__muninnWrapped) {
+      return;
+    }
+
+    ['log', 'warn', 'error', 'info', 'debug'].forEach(function (level) {
+      if (typeof window.console[level] !== 'function') {
+        return;
+      }
+
+      const original = window.console[level].bind(window.console);
+      window.console[level] = function () {
+        try {
+          emitConsoleMessage(level, Array.prototype.slice.call(arguments));
+        } catch (error) {}
+        return original.apply(this, arguments);
+      };
+    });
+
+    window.console.__muninnWrapped = true;
   }
 
   function patchHistory() {
@@ -1101,6 +1338,7 @@ export function buildBridgeBootstrapScript() {
   patchXmlHttpRequest();
   patchSendBeacon();
   patchHistory();
+  patchConsole();
   postFrameReady();
   emitObservationState(existingRuntime ? 'runtime-reused' : 'bootstrap');
   emitPageEvent('bootstrap', {

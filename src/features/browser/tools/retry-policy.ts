@@ -32,26 +32,36 @@ const FALLBACK_CHAINS: Partial<Record<ToolName, FallbackEntry[]>> = {
           typeof original.id === 'string' ? original.id : null;
         if (!targetId) return null;
 
-        const bounds = snapshot.axNodeBounds.get(targetId);
+        const domTargetId = snapshot.refToDomId.get(targetId) ?? targetId;
+        const bounds = snapshot.axNodeBounds.get(domTargetId);
         if (!bounds) return null;
 
-        return {
-          x: Math.round(bounds.x + bounds.width / 2),
-          y: Math.round(bounds.y + bounds.height / 2),
-        };
+        return boundsCenter(bounds);
       },
     },
   ],
   type: [
     {
-      action: 'type',
-      deriveParams: (original) => ({ ...original }),
+      action: 'click',
+      deriveParams: (original) => {
+        const targetId =
+          typeof original.id === 'string' ? original.id : null;
+        if (!targetId) return null;
+
+        return { id: targetId };
+      },
     },
   ],
   fill: [
     {
-      action: 'fill',
-      deriveParams: (original) => ({ ...original }),
+      action: 'click',
+      deriveParams: (original) => {
+        const targetId =
+          typeof original.id === 'string' ? original.id : null;
+        if (!targetId) return null;
+
+        return { id: targetId };
+      },
     },
   ],
   scroll: [
@@ -85,9 +95,12 @@ export function getRetryDirective(
   attemptIndex: number,
   snapshot: ValidationSnapshot,
 ): RetryDirective {
-  // Only retry on no_op — everything else either succeeded, is a stale ref
-  // (needs re-observation), or is unrecoverable.
-  if (validation.outcome !== 'no_op') {
+  const retryableOutcomes =
+    action === 'type' || action === 'fill'
+      ? new Set(['no_op', 'unrecoverable'])
+      : new Set(['no_op']);
+
+  if (!retryableOutcomes.has(validation.outcome)) {
     return { retry: false };
   }
 

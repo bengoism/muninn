@@ -26,10 +26,18 @@ final class AgentRuntimeService {
     do {
       let request = try AgentRuntimeRequest(dictionary: requestDictionary)
       let screenshot = try screenshotLoader.load(from: request.screenshotUrl)
-      let prompt = promptBuilder.buildPrompt(for: request, screenshot: screenshot)
+      let planningScreenshot = try request.planningContext.map { planningContext in
+        try screenshotLoader.load(from: planningContext.fullPageScreenshotUrl)
+      }
+      let prompt = promptBuilder.buildPrompt(
+        for: request,
+        screenshot: screenshot,
+        planningScreenshot: planningScreenshot
+      )
       let candidate = try engine(for: request).infer(
         request: request,
         screenshot: screenshot,
+        planningScreenshot: planningScreenshot,
         prompt: prompt
       )
       let validatedAction = try actionValidator.validate(candidate)

@@ -1,4 +1,4 @@
-import type { Bounds } from '../../types/agent';
+import type { Bounds, ObservationRefEntry } from '../../types/agent';
 
 export type BrowserFixtureId = 'bridge';
 
@@ -96,11 +96,35 @@ export type BrowserAxSnapshotRefEntry = {
   selector: string;
 };
 
+export type BrowserConsoleMessageLevel = 'log' | 'warn' | 'error' | 'info' | 'debug';
+
+export type BrowserConsoleMessagePayload = {
+  args: (Record<string, unknown> | string | number | boolean | null)[];
+  level: BrowserConsoleMessageLevel;
+};
+
+export type BrowserNetworkSummaryPhase =
+  | 'started'
+  | 'completed'
+  | 'failed'
+  | 'send_beacon';
+
+export type BrowserNetworkSummaryPayload = {
+  durationMs: number | null;
+  error: string | null;
+  method: string;
+  phase: BrowserNetworkSummaryPhase;
+  requestId: string;
+  statusCode: number | null;
+  transport: 'fetch' | 'xhr' | 'beacon';
+  url: string;
+};
+
 export type BrowserAxSnapshotPayload = {
   requestId: string;
   nodes: BrowserAxSnapshotNodePayload[];
   treeText: string;
-  refMap: Record<string, BrowserAxSnapshotRefEntry>;
+  refMap: Record<string, ObservationRefEntry>;
   observedAt: string;
 };
 
@@ -123,6 +147,16 @@ export type BrowserBridgeReadyMessage = BrowserBridgeEnvelopeBase & {
 export type BrowserPageEventMessage = BrowserBridgeEnvelopeBase & {
   kind: 'page_event';
   payload: BrowserPageEventPayload;
+};
+
+export type BrowserConsoleMessage = BrowserBridgeEnvelopeBase & {
+  kind: 'console_message';
+  payload: BrowserConsoleMessagePayload;
+};
+
+export type BrowserNetworkSummaryMessage = BrowserBridgeEnvelopeBase & {
+  kind: 'network_summary';
+  payload: BrowserNetworkSummaryPayload;
 };
 
 export type BrowserScriptErrorMessage = BrowserBridgeEnvelopeBase & {
@@ -165,6 +199,8 @@ export type BrowserAxSnapshotErrorMessage = BrowserBridgeEnvelopeBase & {
 export type BrowserBridgeMessage =
   | BrowserBridgeReadyMessage
   | BrowserPageEventMessage
+  | BrowserConsoleMessage
+  | BrowserNetworkSummaryMessage
   | BrowserScriptErrorMessage
   | BrowserObservationStateMessage
   | BrowserFrameLinkMessage

@@ -9,6 +9,7 @@ function makeSnapshot(
   overrides: Partial<ValidationSnapshot> = {},
 ): ValidationSnapshot {
   return {
+    activeShortRef: null,
     url: 'https://example.com',
     isLoading: false,
     scrollY: 0,
@@ -22,6 +23,9 @@ function makeSnapshot(
     axNodeCount: 3,
     focusedElementId: null,
     hasDialog: false,
+    knownRefIds: new Set(),
+    liveRefIds: new Set(),
+    refToDomId: new Map(),
     timestamp: Date.now(),
     ...overrides,
   };
@@ -50,6 +54,26 @@ describe('isStaleRef', () => {
   it('returns false when element ID is present', () => {
     const snapshot = makeSnapshot();
     expect(isStaleRef('btn-1', snapshot)).toBe(false);
+  });
+
+  it('returns false for a known short ref with a live mapped node', () => {
+    const snapshot = makeSnapshot({
+      knownRefIds: new Set(['e1']),
+      liveRefIds: new Set(['e1']),
+      refToDomId: new Map([['e1', 'btn-1']]),
+    });
+    expect(isStaleRef('e1', snapshot)).toBe(false);
+  });
+
+  it('returns true for a known short ref whose mapped node is gone', () => {
+    const snapshot = makeSnapshot({
+      axNodeIds: new Set(['input-2', 'link-3']),
+      axNodeCount: 2,
+      knownRefIds: new Set(['e1']),
+      liveRefIds: new Set(),
+      refToDomId: new Map([['e1', 'btn-1']]),
+    });
+    expect(isStaleRef('e1', snapshot)).toBe(true);
   });
 });
 
@@ -108,6 +132,33 @@ describe('classifyOutcome — click', () => {
     const after = makeSnapshot();
     const toolResult = makeToolResult({ ok: false, reason: 'Element not found: btn-99' });
     const result = classifyOutcome('click', { id: 'btn-99' }, toolResult, before, after);
+    expect(result.outcome).toBe('stale_ref');
+  });
+
+  it('returns stale_ref when a known short ref fails to resolve', () => {
+    const before = makeSnapshot({
+      knownRefIds: new Set(['e1']),
+      liveRefIds: new Set(),
+      refToDomId: new Map([['e1', 'btn-1']]),
+    });
+    const after = makeSnapshot({
+      knownRefIds: new Set(['e1']),
+      liveRefIds: new Set(),
+      refToDomId: new Map([['e1', 'btn-1']]),
+    });
+    const toolResult = makeToolResult({
+      ok: false,
+      reason: 'Element not found: e1',
+      debug: {
+        jsCall: null,
+        matchedElement: null,
+        requestedAction: 'click',
+        requestedParams: { id: 'e1' },
+        resolver: null,
+        targetState: 'stale_ref',
+      },
+    });
+    const result = classifyOutcome('click', { id: 'e1' }, toolResult, before, after);
     expect(result.outcome).toBe('stale_ref');
   });
 

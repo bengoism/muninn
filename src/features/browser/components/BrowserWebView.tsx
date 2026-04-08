@@ -9,6 +9,7 @@ import {
 import { StyleSheet, View } from 'react-native';
 
 import type {
+  FullPageCapture,
   ObservationQuiescence,
   ObservationResult,
   ViewportCapture,
@@ -16,6 +17,7 @@ import type {
 import {
   BrowserHostView,
   type BrowserHostEvaluationOutcome,
+  type BrowserHostFullPageCaptureOutcome,
   type BrowserHostViewportCaptureOutcome,
   type BrowserHostViewHandle as NativeBrowserHostViewHandle,
 } from '../../../native/browser-host';
@@ -53,6 +55,7 @@ type BrowserWebViewProps = {
 };
 
 export type BrowserWebViewHandle = {
+  captureFullPage: () => Promise<FullPageCapture>;
   captureViewport: () => Promise<ViewportCapture>;
   evaluateJavaScript: <T = unknown>(
     source: string,
@@ -61,6 +64,7 @@ export type BrowserWebViewHandle = {
     }
   ) => Promise<BrowserEvaluationResult<T>>;
   observe: (options?: {
+    includeFullPageScreenshot?: boolean;
     idleThresholdMs?: number;
     quiescenceTimeoutMs?: number;
     snapshotTimeoutMs?: number;
@@ -333,6 +337,21 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
       throw new Error(result.message);
     }, []);
 
+    const captureFullPage = useCallback(async () => {
+      if (!hostRef.current) {
+        throw new Error('The native browser host is not mounted.');
+      }
+
+      const result: BrowserHostFullPageCaptureOutcome =
+        await hostRef.current.captureFullPage();
+
+      if (result.ok) {
+        return result.capture;
+      }
+
+      throw new Error(result.message);
+    }, []);
+
     const waitForQuiescence = useCallback(
       async (options?: {
         idleThresholdMs?: number;
@@ -515,6 +534,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
     useImperativeHandle(
       ref,
       () => ({
+        captureFullPage,
         captureViewport,
         evaluateJavaScript: async <T = unknown>(
           source: string,
@@ -599,6 +619,9 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
           const quiescence = await waitForQuiescence(options);
 
           const screenshot = await captureViewport();
+          const fullPageScreenshot = options?.includeFullPageScreenshot
+            ? await captureFullPage()
+            : null;
           const snapshotResult = await requestObservationSnapshots(
             options?.snapshotTimeoutMs ?? 1600
           );
@@ -625,7 +648,9 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
           return {
             axSnapshot: stitched.axSnapshot,
             axTreeText: stitched.axTreeText,
+            debug: stitched.debug,
             frameSnapshots: stitched.frameSnapshots,
+            fullPageScreenshot,
             observedAt: new Date().toISOString(),
             quiescence,
             screenshot,
@@ -646,6 +671,7 @@ export const BrowserWebView = forwardRef<BrowserWebViewHandle, BrowserWebViewPro
         },
       }),
       [
+        captureFullPage,
         captureViewport,
         requestObservationSnapshots,
         resolvePendingEvaluation,

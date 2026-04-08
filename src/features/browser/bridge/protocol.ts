@@ -4,11 +4,13 @@ import type {
   BrowserAxSnapshotPayload,
   BrowserBridgeMessage,
   BrowserBridgeParseError,
+  BrowserConsoleMessagePayload,
   BrowserEvaluationErrorPayload,
   BrowserEvaluationErrorType,
   BrowserEvaluationResultPayload,
   BrowserFrameLinkPayload,
   BrowserFrameMetadata,
+  BrowserNetworkSummaryPayload,
   BrowserObservationStatePayload,
   BrowserPageEventPayload,
   BrowserScriptErrorPayload,
@@ -86,6 +88,40 @@ function isPageEventPayload(value: unknown): value is BrowserPageEventPayload {
     isRecord(value) &&
     isString(value.event) &&
     (value.detail === null || value.detail === undefined || isRecord(value.detail))
+  );
+}
+
+function isConsoleMessagePayload(
+  value: unknown
+): value is BrowserConsoleMessagePayload {
+  return (
+    isRecord(value) &&
+    (value.level === 'log' ||
+      value.level === 'warn' ||
+      value.level === 'error' ||
+      value.level === 'info' ||
+      value.level === 'debug') &&
+    isArray(value.args)
+  );
+}
+
+function isNetworkSummaryPayload(
+  value: unknown
+): value is BrowserNetworkSummaryPayload {
+  return (
+    isRecord(value) &&
+    isString(value.requestId) &&
+    isString(value.transport) &&
+    isString(value.phase) &&
+    isString(value.method) &&
+    isString(value.url) &&
+    (value.statusCode === null ||
+      value.statusCode === undefined ||
+      isNumber(value.statusCode)) &&
+    (value.durationMs === null ||
+      value.durationMs === undefined ||
+      isNumber(value.durationMs)) &&
+    (value.error === null || value.error === undefined || isString(value.error))
   );
 }
 
@@ -268,6 +304,55 @@ export function parseBrowserBridgeMessage(
       payload: {
         event: parsed.payload.event,
         detail: isRecord(parsed.payload.detail) ? parsed.payload.detail : null,
+      },
+    };
+  }
+
+  if (parsed.kind === 'console_message') {
+    if (!isConsoleMessagePayload(parsed.payload)) {
+      return createParseError('Console message payload is malformed.', raw);
+    }
+
+    return {
+      channel: BROWSER_BRIDGE_CHANNEL,
+      kind: 'console_message',
+      timestamp: parsed.timestamp,
+      frame,
+      payload: {
+        args: parsed.payload.args as (
+          Record<string, unknown> | string | number | boolean | null
+        )[],
+        level: parsed.payload.level,
+      },
+    };
+  }
+
+  if (parsed.kind === 'network_summary') {
+    if (!isNetworkSummaryPayload(parsed.payload)) {
+      return createParseError('Network summary payload is malformed.', raw);
+    }
+
+    return {
+      channel: BROWSER_BRIDGE_CHANNEL,
+      kind: 'network_summary',
+      timestamp: parsed.timestamp,
+      frame,
+      payload: {
+        durationMs:
+          parsed.payload.durationMs === undefined
+            ? null
+            : parsed.payload.durationMs,
+        error:
+          parsed.payload.error === undefined ? null : parsed.payload.error,
+        method: parsed.payload.method,
+        phase: parsed.payload.phase,
+        requestId: parsed.payload.requestId,
+        statusCode:
+          parsed.payload.statusCode === undefined
+            ? null
+            : parsed.payload.statusCode,
+        transport: parsed.payload.transport,
+        url: parsed.payload.url,
       },
     };
   }

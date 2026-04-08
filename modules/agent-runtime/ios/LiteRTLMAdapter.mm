@@ -11,6 +11,10 @@ typedef NS_ENUM(NSInteger, LiteRTLMAdapterErrorCode) {
   LiteRTLMAdapterErrorInvalidResponse = 504,
 };
 
+static id _Nullable LiteRTLMParseJSONObjectFromUTF8(const char *jsonCString);
+static LiteRtLmSamplerParams LiteRTLMSamplerParamsFromRuntimeConfig(
+    NSDictionary<NSString *, id> *runtimeConfig);
+
 static NSError *LiteRTLMError(NSInteger code, NSString *description,
                               NSDictionary<NSString *, id> *context) {
   NSMutableDictionary<NSString *, id> *userInfo = [context mutableCopy];
@@ -94,6 +98,49 @@ static NSDictionary<NSString *, id> *LiteRTLMCollectModelFileDiagnostics(NSStrin
   return diagnostics;
 }
 
+static NSDictionary<NSString *, id> *LiteRTLMCollectInputFileDiagnostics(NSString *path) {
+  NSMutableDictionary<NSString *, id> *diagnostics = [NSMutableDictionary dictionary];
+  diagnostics[@"path"] = path ?: @"";
+
+  if (path.length == 0) {
+    diagnostics[@"present"] = @NO;
+    return diagnostics;
+  }
+
+  diagnostics[@"present"] = @YES;
+
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  BOOL isDirectory = NO;
+  BOOL fileExists = [fileManager fileExistsAtPath:path isDirectory:&isDirectory];
+  diagnostics[@"fileExists"] = @(fileExists);
+  diagnostics[@"isDirectory"] = @(isDirectory);
+  diagnostics[@"isReadable"] = @([fileManager isReadableFileAtPath:path]);
+  diagnostics[@"pathExtension"] = path.pathExtension.lowercaseString ?: @"";
+
+  if (!fileExists || isDirectory) {
+    return diagnostics;
+  }
+
+  NSDictionary<NSFileAttributeKey, id> *fileAttributes =
+      [fileManager attributesOfItemAtPath:path error:nil];
+  if (fileAttributes[NSFileSize] != nil) {
+    diagnostics[@"fileSizeBytes"] = fileAttributes[NSFileSize];
+  }
+  if (fileAttributes[NSFileModificationDate] != nil) {
+    NSDate *modifiedAt = fileAttributes[NSFileModificationDate];
+    diagnostics[@"modifiedAtMs"] = @((long long)([modifiedAt timeIntervalSince1970] * 1000.0));
+  }
+
+  return diagnostics;
+}
+
+static NSString *LiteRTLMTruncatedString(NSString *value, NSUInteger limit) {
+  if (value.length <= limit) {
+    return value;
+  }
+  return [value substringToIndex:limit];
+}
+
 static NSInteger LiteRTLMPositiveIntegerValue(id value, NSInteger fallback) {
   if ([value isKindOfClass:[NSNumber class]]) {
     NSInteger integerValue = [(NSNumber *)value integerValue];
@@ -159,6 +206,123 @@ static NSInteger LiteRTLMMaxOutputTokensFromRuntimeConfig(
 static BOOL LiteRTLMVerboseNativeLoggingFromRuntimeConfig(
     NSDictionary<NSString *, id> *runtimeConfig) {
   return LiteRTLMBooleanValue(runtimeConfig[@"enableVerboseNativeLogging"], NO);
+}
+
+static NSDictionary<NSString *, id> *LiteRTLMProbeConversationSend(
+    LiteRtLmEngine *engine,
+    NSDictionary<NSString *, id> *runtimeConfig,
+    NSString *systemMessageJSON,
+    NSString *toolsJSON,
+    NSString *prompt,
+    NSArray<NSString *> *imagePaths,
+    NSString *label) {
+  NSMutableDictionary<NSString *, id> *probe = [NSMutableDictionary dictionary];
+  probe[@"label"] = label ?: @"";
+  probe[@"imageCount"] = @(imagePaths.count);
+  probe[@"imagePaths"] = [imagePaths copy] ?: @[];
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *imageDiagnostics = [NSMutableArray array];
+  for (NSString *imagePath in imagePaths) {
+    [imageDiagnostics addObject:LiteRTLMCollectInputFileDiagnostics(imagePath)];
+  }
+  probe[@"imageDiagnostics"] = imageDiagnostics;
+
+  LiteRtLmSessionConfig *sessionConfig = litert_lm_session_config_create();
+  if (sessionConfig == nullptr) {
+    probe[@"ok"] = @NO;
+    probe[@"stage"] = @"session_config_create";
+    return probe;
+  }
+
+  LiteRtLmSamplerParams samplerParams =
+      LiteRTLMSamplerParamsFromRuntimeConfig(runtimeConfig);
+  litert_lm_session_config_set_max_output_tokens(
+      sessionConfig,
+      (int)LiteRTLMMaxOutputTokensFromRuntimeConfig(runtimeConfig));
+  litert_lm_session_config_set_sampler_params(sessionConfig, &samplerParams);
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *content = [NSMutableArray array];
+  for (NSString *imagePath in imagePaths) {
+    [content addObject:@{ @"type": @"image", @"path": imagePath }];
+  }
+  [content addObject:@{ @"type": @"text", @"text": prompt ?: @"" }];
+
+  NSDictionary<NSString *, id> *message = @{
+    @"role": @"user",
+    @"content": content,
+  };
+
+  NSData *messageData = [NSJSONSerialization dataWithJSONObject:message options:0 error:nil];
+  if (messageData == nil) {
+    litert_lm_session_config_delete(sessionConfig);
+    probe[@"ok"] = @NO;
+    probe[@"stage"] = @"message_serialize";
+    return probe;
+  }
+
+  NSString *messageJSON = [[NSString alloc] initWithData:messageData encoding:NSUTF8StringEncoding];
+  probe[@"messageJsonLength"] = @(messageJSON.length);
+
+  LiteRtLmConversationConfig *conversationConfig =
+      litert_lm_conversation_config_create(
+          engine, sessionConfig,
+          systemMessageJSON ? systemMessageJSON.UTF8String : nullptr,
+          toolsJSON ? toolsJSON.UTF8String : nullptr,
+          nullptr, false);
+  litert_lm_session_config_delete(sessionConfig);
+
+  if (conversationConfig == nullptr) {
+    probe[@"ok"] = @NO;
+    probe[@"stage"] = @"conversation_config_create";
+    return probe;
+  }
+
+  LiteRtLmConversation *conversation =
+      litert_lm_conversation_create(engine, conversationConfig);
+  litert_lm_conversation_config_delete(conversationConfig);
+
+  if (conversation == nullptr) {
+    probe[@"ok"] = @NO;
+    probe[@"stage"] = @"conversation_create";
+    return probe;
+  }
+
+  LiteRtLmJsonResponse *jsonResponse =
+      litert_lm_conversation_send_message(conversation, messageJSON.UTF8String, nullptr);
+
+  if (jsonResponse == nullptr) {
+    litert_lm_conversation_delete(conversation);
+    probe[@"ok"] = @NO;
+    probe[@"stage"] = @"conversation_send_message";
+    return probe;
+  }
+
+  const char *responseCString = litert_lm_json_response_get_string(jsonResponse);
+  NSString *responseJSONString = responseCString != nullptr
+      ? [NSString stringWithUTF8String:responseCString] : nil;
+  id responseObject = LiteRTLMParseJSONObjectFromUTF8(responseCString);
+
+  litert_lm_json_response_delete(jsonResponse);
+  litert_lm_conversation_delete(conversation);
+
+  probe[@"ok"] = @YES;
+  probe[@"stage"] = @"response";
+  probe[@"responseLength"] = @(responseJSONString.length);
+
+  if ([responseObject isKindOfClass:[NSDictionary class]]) {
+    NSDictionary<NSString *, id> *responseDictionary = (NSDictionary<NSString *, id> *)responseObject;
+    probe[@"responseKeys"] = [responseDictionary allKeys] ?: @[];
+    probe[@"responseHasToolCalls"] =
+        @([responseDictionary[@"tool_calls"] isKindOfClass:[NSArray class]]);
+    NSString *action = responseDictionary[@"action"];
+    if ([action isKindOfClass:[NSString class]] && action.length > 0) {
+      probe[@"responseAction"] = action;
+    }
+  } else if (responseJSONString.length > 0) {
+    probe[@"responsePreview"] = LiteRTLMTruncatedString(responseJSONString, 200);
+  }
+
+  return probe;
 }
 
 static NSString *LiteRTLMSamplerTypeName(Type samplerType) {
@@ -498,6 +662,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
                                                      prompt:(NSString *)prompt
                                                        goal:(NSString *)goal
                                              screenshotPath:(NSString *)screenshotPath
+                                     planningScreenshotPath:(NSString * _Nullable)planningScreenshotPath
                                                 axNodeCount:(NSNumber *)axNodeCount
                                                       error:(NSError * _Nullable __autoreleasing *)error {
   const CFAbsoluteTime startedAt = CFAbsoluteTimeGetCurrent();
@@ -534,6 +699,11 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   NSDictionary<NSFileAttributeKey, id> *screenshotAttributes =
       [[NSFileManager defaultManager] attributesOfItemAtPath:screenshotPath error:nil];
   runtimeDiagnostics[@"screenshotBytes"] = screenshotAttributes[NSFileSize] ?: @(0);
+  runtimeDiagnostics[@"viewportScreenshot"] = LiteRTLMCollectInputFileDiagnostics(screenshotPath);
+  if (planningScreenshotPath.length > 0) {
+    runtimeDiagnostics[@"planningScreenshot"] =
+        LiteRTLMCollectInputFileDiagnostics(planningScreenshotPath);
+  }
 
   // Build session and conversation config.
   LiteRtLmSessionConfig *sessionConfig = litert_lm_session_config_create();
@@ -558,67 +728,103 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   static NSString *toolsJSON = nil;
   static dispatch_once_t toolsOnce;
   dispatch_once(&toolsOnce, ^{
+    NSDictionary<NSString *, id> *planUpdatesSchema = @{
+      @"type": @"array",
+      @"description": @"Optional bounded plan mutations for the runtime to validate before commit.",
+      @"items": @{
+        @"type": @"object",
+        @"properties": @{
+          @"type": @{
+            @"type": @"string",
+            @"description": @"Plan mutation type",
+            @"enum": @[ @"add_item", @"set_active_item", @"complete_item", @"reopen_item", @"drop_item", @"set_phase" ]
+          },
+          @"id": @{ @"type": @"string", @"description": @"Existing todo ID for non-add mutations" },
+          @"text": @{ @"type": @"string", @"description": @"Todo text for add_item" },
+          @"activate": @{ @"type": @"boolean", @"description": @"Whether add_item should become active immediately" },
+          @"phase": @{ @"type": @"string", @"description": @"Target phase for set_phase" },
+          @"evidence": @{ @"type": @"string", @"description": @"Short supporting evidence string" },
+          @"reason": @{ @"type": @"string", @"description": @"Short reason for drop_item or related updates" },
+        },
+        @"required": @[ @"type" ]
+      }
+    };
+
     // Gemma 4 Jinja template expects each tool wrapped in {"function": {...}}.
     NSArray<NSDictionary<NSString *, id> *> *tools = @[
       @{ @"function": @{ @"name": @"click", @"description": @"Click an element by accessibility ID",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"id": @{ @"type": @"string", @"description": @"Element accessibility ID" } },
+          @"id": @{ @"type": @"string", @"description": @"Element accessibility ID" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"id" ] } } },
       @{ @"function": @{ @"name": @"tap_coordinates", @"description": @"Tap at screen coordinates",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"x": @{ @"type": @"number", @"description": @"X coordinate" },
-          @"y": @{ @"type": @"number", @"description": @"Y coordinate" } },
+          @"y": @{ @"type": @"number", @"description": @"Y coordinate" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"x", @"y" ] } } },
       @{ @"function": @{ @"name": @"type", @"description": @"Type text into an input element (appends)",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"id": @{ @"type": @"string", @"description": @"Element ref ID" },
-          @"text": @{ @"type": @"string", @"description": @"Text to type" } },
+          @"text": @{ @"type": @"string", @"description": @"Text to type" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"id", @"text" ] } } },
       @{ @"function": @{ @"name": @"fill", @"description": @"Clear input field and set new text",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"id": @{ @"type": @"string", @"description": @"Element ref ID" },
-          @"text": @{ @"type": @"string", @"description": @"Text to fill" } },
+          @"text": @{ @"type": @"string", @"description": @"Text to fill" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"id", @"text" ] } } },
       @{ @"function": @{ @"name": @"select", @"description": @"Pick a dropdown option by value or visible text",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"id": @{ @"type": @"string", @"description": @"Select element ref ID" },
-          @"value": @{ @"type": @"string", @"description": @"Option value or visible text" } },
+          @"value": @{ @"type": @"string", @"description": @"Option value or visible text" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"id", @"value" ] } } },
       @{ @"function": @{ @"name": @"gettext", @"description": @"Read the text content of an element",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"id": @{ @"type": @"string", @"description": @"Element ref ID" } },
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"id" ] } } },
       @{ @"function": @{ @"name": @"hover", @"description": @"Hover over an element to trigger menus or tooltips",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"id": @{ @"type": @"string", @"description": @"Element ref ID" } },
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"id" ] } } },
       @{ @"function": @{ @"name": @"focus", @"description": @"Focus an element",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"id": @{ @"type": @"string", @"description": @"Element ref ID" } },
+          @"id": @{ @"type": @"string", @"description": @"Element ref ID" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"id" ] } } },
       @{ @"function": @{ @"name": @"eval", @"description": @"Run JavaScript in the page and return the result",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"code": @{ @"type": @"string", @"description": @"JavaScript code to execute" } },
+          @"code": @{ @"type": @"string", @"description": @"JavaScript code to execute" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"code" ] } } },
       @{ @"function": @{ @"name": @"scroll", @"description": @"Scroll the page",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"direction": @{ @"type": @"string", @"description": @"up, down, left, or right" },
-          @"amount": @{ @"type": @"string", @"description": @"page, half, or small" } },
+          @"amount": @{ @"type": @"string", @"description": @"page, half, or small" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"direction", @"amount" ] } } },
       @{ @"function": @{ @"name": @"go_back", @"description": @"Navigate back",
-        @"parameters": @{ @"type": @"object", @"properties": @{} } } },
+        @"parameters": @{ @"type": @"object", @"properties": @{
+          @"plan_updates": planUpdatesSchema } } } },
       @{ @"function": @{ @"name": @"wait", @"description": @"Wait for a condition: idle, url:<pattern>, selector:<css>, text:<substring>",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"condition": @{ @"type": @"string", @"description": @"idle, url:<pattern>, selector:<css>, or text:<substring>" } },
+          @"condition": @{ @"type": @"string", @"description": @"idle, url:<pattern>, selector:<css>, or text:<substring>" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"condition" ] } } },
       @{ @"function": @{ @"name": @"yield_to_user", @"description": @"Ask the user for help",
         @"parameters": @{ @"type": @"object", @"properties": @{
-          @"reason": @{ @"type": @"string", @"description": @"Why user input is needed" } },
+          @"reason": @{ @"type": @"string", @"description": @"Why user input is needed" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"reason" ] } } },
       @{ @"function": @{ @"name": @"finish", @"description": @"Task is complete",
         @"parameters": @{ @"type": @"object", @"properties": @{
           @"status": @{ @"type": @"string", @"description": @"success or failure" },
-          @"message": @{ @"type": @"string", @"description": @"Summary of outcome" } },
+          @"message": @{ @"type": @"string", @"description": @"Summary of outcome" },
+          @"plan_updates": planUpdatesSchema },
           @"required": @[ @"status", @"message" ] } } },
     ];
     NSData *data = [NSJSONSerialization dataWithJSONObject:tools options:0 error:nil];
@@ -632,8 +838,9 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
     NSDictionary<NSString *, id> *systemMessage = @{
       @"role": @"system",
       @"content": @"You are a browser automation agent. You see a screenshot of a webpage and an accessibility tree. "
+                   "You may receive one or two images. The first is the current viewport. If present, the second is a full-page overview of the same page for planning. "
                    "Decide the single best next action to achieve the user's goal. "
-                   "Respond with exactly one JSON object: {\"action\": \"<name>\", \"parameters\": {<params>}}. "
+                   "Respond with exactly one JSON object: {\"action\": \"<name>\", \"parameters\": {<params>}, \"plan_updates\": [optional bounded updates]}. "
                    "Do not include any text outside the JSON."
     };
     NSData *data = [NSJSONSerialization dataWithJSONObject:systemMessage options:0 error:nil];
@@ -643,12 +850,17 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   // Build multimodal conversation message with screenshot file path + prompt.
   // LiteRT-LM's LoadItemData accepts {"type":"image","path":"..."} and
   // memory-maps the file directly — no base64 encoding needed.
+  NSMutableArray<NSDictionary<NSString *, id> *> *content = [NSMutableArray arrayWithObject:
+    @{ @"type": @"image", @"path": screenshotPath }
+  ];
+  if (planningScreenshotPath.length > 0) {
+    [content addObject:@{ @"type": @"image", @"path": planningScreenshotPath }];
+  }
+  [content addObject:@{ @"type": @"text", @"text": prompt }];
+
   NSDictionary<NSString *, id> *message = @{
     @"role": @"user",
-    @"content": @[
-      @{ @"type": @"image", @"path": screenshotPath },
-      @{ @"type": @"text", @"text": prompt },
-    ],
+    @"content": content,
   };
 
   NSData *messageData = [NSJSONSerialization dataWithJSONObject:message options:0 error:nil];
@@ -712,6 +924,38 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
 
   if (jsonResponse == nullptr) {
     litert_lm_conversation_delete(conversation);
+    if (planningScreenshotPath.length > 0) {
+      NSDictionary<NSString *, id> *probeResults = @{
+        @"both": LiteRTLMProbeConversationSend(
+            engine,
+            runtimeConfig,
+            systemMessageJSON,
+            toolsJSON,
+            prompt,
+            @[ screenshotPath, planningScreenshotPath ],
+            @"both"),
+        @"viewport_only": LiteRTLMProbeConversationSend(
+            engine,
+            runtimeConfig,
+            systemMessageJSON,
+            toolsJSON,
+            prompt,
+            @[ screenshotPath ],
+            @"viewport_only"),
+        @"full_page_only": LiteRTLMProbeConversationSend(
+            engine,
+            runtimeConfig,
+            systemMessageJSON,
+            toolsJSON,
+            prompt,
+            @[ planningScreenshotPath ],
+            @"full_page_only")
+      };
+      runtimeDiagnostics[@"multimodalProbe"] = probeResults;
+      if (verboseNativeLogging) {
+        NSLog(@"[LiteRTLMAdapter] multimodal failure probe=%@", probeResults);
+      }
+    }
     if (error != nil) {
       *error = LiteRTLMError(LiteRTLMAdapterErrorExecutionFailed,
                              @"conversation_send_message=null",
@@ -747,6 +991,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   NSDictionary<NSString *, id> *responseDictionary = (NSDictionary<NSString *, id> *)responseObject;
   NSString *action = nil;
   NSDictionary<NSString *, id> *parameters = nil;
+  NSArray<NSDictionary<NSString *, id> *> *planUpdates = nil;
 
   // Parse Gemma 4 native tool_calls format:
   // {"role":"assistant","tool_calls":[{"type":"function","function":{"name":"...","arguments":{...}}}]}
@@ -771,6 +1016,11 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
               cleaned[key] = value;
             }
           }
+          id rawPlanUpdates = cleaned[@"plan_updates"];
+          if ([rawPlanUpdates isKindOfClass:[NSArray class]]) {
+            planUpdates = (NSArray<NSDictionary<NSString *, id> *> *)rawPlanUpdates;
+            [cleaned removeObjectForKey:@"plan_updates"];
+          }
           parameters = cleaned;
         }
       }
@@ -781,6 +1031,9 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   if (action == nil) {
     action = responseDictionary[@"action"];
     parameters = responseDictionary[@"parameters"];
+    if ([responseDictionary[@"plan_updates"] isKindOfClass:[NSArray class]]) {
+      planUpdates = (NSArray<NSDictionary<NSString *, id> *> *)responseDictionary[@"plan_updates"];
+    }
 
     // Also try extracting text content and parsing as JSON.
     if (action == nil) {
@@ -806,6 +1059,9 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
         if ([textObject isKindOfClass:[NSDictionary class]]) {
           action = ((NSDictionary *)textObject)[@"action"];
           parameters = ((NSDictionary *)textObject)[@"parameters"];
+          if ([((NSDictionary *)textObject)[@"plan_updates"] isKindOfClass:[NSArray class]]) {
+            planUpdates = ((NSDictionary *)textObject)[@"plan_updates"];
+          }
         }
       }
 
@@ -888,6 +1144,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   return @{
     @"action": action,
     @"parameters": parameters,
+    @"planUpdates": planUpdates ?: NSNull.null,
     @"diagnostics": runtimeDiagnostics,
   };
 }

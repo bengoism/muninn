@@ -46,6 +46,13 @@ export type AxNode = {
   redactionReason: string | null;
 };
 
+export type ObservationRefEntry = {
+  domId: string;
+  role: string;
+  label: string;
+  selector: string;
+};
+
 export type AgentActionStatus =
   | 'pending'
   | 'succeeded'
@@ -69,12 +76,99 @@ export type AgentActionRecord = {
   fallbackChain?: ToolName[];
 };
 
+export type PlanPhase =
+  | 'initial'
+  | 'search'
+  | 'results'
+  | 'detail'
+  | 'form'
+  | 'checkout'
+  | 'blocked'
+  | 'done';
+
+export type PlanItemStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'blocked'
+  | 'dropped';
+
+export type PlanItemSource = 'system' | 'model';
+
+export type PlanningContextReason =
+  | 'post_navigation'
+  | 'repeated_failure'
+  | 'sparse_refs'
+  | 'plan_ambiguity';
+
+export type InferencePlanningContext = {
+  fullPageScreenshotUri: string;
+  reasons: PlanningContextReason[];
+  summary: string;
+};
+
+export type PlanningContextDebugRequest = {
+  fullPageCaptured: boolean;
+  fullPageScreenshotUri: string | null;
+  reasons: PlanningContextReason[];
+  source: 'planning' | 'debug_raw' | 'planning_and_debug_raw';
+  step: number;
+  summary: string;
+  url: string | null;
+};
+
+export type PlanUpdateType =
+  | 'add_item'
+  | 'set_active_item'
+  | 'complete_item'
+  | 'reopen_item'
+  | 'drop_item'
+  | 'set_phase';
+
+export type PlanUpdateProposal = {
+  type: PlanUpdateType;
+  id?: string;
+  text?: string;
+  phase?: PlanPhase;
+  activate?: boolean;
+  evidence?: string;
+  reason?: string;
+};
+
+export type PlanItem = {
+  id: string;
+  text: string;
+  status: PlanItemStatus;
+  source: PlanItemSource;
+  evidence: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AvoidRef = {
+  ref: string;
+  reason: string;
+  expiresAfterStep: number;
+};
+
+export type SessionPlan = {
+  phase: PlanPhase;
+  activeItemId: string | null;
+  lastConfirmedProgress: string | null;
+  items: PlanItem[];
+  avoidRefs: AvoidRef[];
+  notes: string[];
+  updatedAt: string;
+};
+
 export type InferenceRequest = {
   goal: string;
   screenshotUri: string;
+  planningContext: InferencePlanningContext | null;
   axSnapshot: AxNode[];
   axTreeText: string;
   actionHistory: AgentActionRecord[];
+  sessionPlan: SessionPlan | null;
   runtimeMode: RuntimeMode;
 };
 
@@ -82,6 +176,7 @@ export type InferenceSuccess = {
   ok: true;
   action: ToolName;
   parameters: Record<string, unknown>;
+  planUpdates: PlanUpdateProposal[] | null;
   backend: string;
   diagnostics: Record<string, unknown> | null;
 };
@@ -152,6 +247,14 @@ export type ViewportCapture = {
   capturedAt: string;
 };
 
+export type FullPageCapture = ViewportCapture & {
+  tileCount: number;
+  viewportOriginX: number;
+  viewportOriginY: number;
+  viewportPointWidth: number;
+  viewportPointHeight: number;
+};
+
 export type ObservationQuiescence = {
   satisfied: boolean;
   timedOut: boolean;
@@ -176,9 +279,27 @@ export type ObservationFrameSnapshot = {
 
 export type ObservationResult = {
   screenshot: ViewportCapture;
+  fullPageScreenshot: FullPageCapture | null;
   axSnapshot: AxNode[];
   axTreeText: string;
   frameSnapshots: ObservationFrameSnapshot[];
+  debug: {
+    combinedRefMap: Record<string, ObservationRefEntry>;
+    expectedFrameIds: string[];
+    frameArtifacts: {
+      error: string | null;
+      frameId: string;
+      frameTitle: string | null;
+      frameUrl: string | null;
+      isTopFrame: boolean;
+      nodeCount: number;
+      observedAt: string | null;
+      refIds: string[];
+      refMap: Record<string, ObservationRefEntry>;
+      treeText: string;
+    }[];
+    timedOut: boolean;
+  };
   warnings: string[];
   quiescence: ObservationQuiescence;
   observedAt: string;

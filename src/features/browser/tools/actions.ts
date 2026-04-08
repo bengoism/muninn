@@ -2,68 +2,360 @@
  * JavaScript to inject into the page for browser action execution.
  * Installs window.__MUNINN_ACTIONS__ with click, type, scroll, and
  * tapCoordinates helpers. Uses data-ai-internal-id attributes assigned
- * by the observation bridge.
+ * by the observation bridge and returns structured locator traces.
  */
 export const ACTIONS_INJECTION_SCRIPT = `
 (function() {
   if (window.__MUNINN_ACTIONS__) return;
 
-  function findById(elementId) {
-    // Strategy 1: Short ref via ref map (e1, e2, etc.)
-    var refMap = window.__MUNINN_REF_MAP__ || {};
-    var entry = refMap[elementId];
-    if (entry) {
-      // 1a: Try data-ai-internal-id attribute (fast path)
-      var el = document.querySelector('[data-ai-internal-id="' + entry.domId + '"]');
-      if (el) return el;
+  var NODE_ID_ATTR = 'data-ai-internal-id';
 
-      // 1b: Re-query by CSS selector + label match (survives React re-renders)
-      try {
-        var candidates = document.querySelectorAll(entry.selector);
-        for (var i = 0; i < candidates.length; i++) {
-          var c = candidates[i];
-          var cLabel = '';
-          var ariaLabel = c.getAttribute('aria-label');
-          if (ariaLabel) { cLabel = ariaLabel; }
-          else if (c.innerText) { cLabel = c.innerText.trim().substring(0, 100); }
-          else if (c.textContent) { cLabel = c.textContent.trim().substring(0, 100); }
-
-          if (entry.label && cLabel.indexOf(entry.label.substring(0, 30)) !== -1) {
-            c.setAttribute('data-ai-internal-id', entry.domId);
-            return c;
-          }
-        }
-      } catch (e) {}
-
-      // 1c: Try all interactive elements matching the role
-      try {
-        var role = entry.role;
-        var roleSelector = '[role="' + role + '"]';
-        if (role === 'textbox') roleSelector = 'input, textarea, [role="textbox"], [contenteditable]';
-        else if (role === 'button') roleSelector = 'button, [role="button"]';
-        else if (role === 'link') roleSelector = 'a[href], [role="link"]';
-        else if (role === 'combobox') roleSelector = 'select, [role="combobox"]';
-
-        var roleEls = document.querySelectorAll(roleSelector);
-        for (var r = 0; r < roleEls.length; r++) {
-          var re = roleEls[r];
-          if (!re.getAttribute('data-ai-internal-id')) {
-            var reLabel = re.getAttribute('aria-label') || re.getAttribute('placeholder') || '';
-            if (entry.label && reLabel.indexOf(entry.label.substring(0, 20)) !== -1) {
-              re.setAttribute('data-ai-internal-id', entry.domId);
-              return re;
-            }
-          }
-        }
-      } catch (e) {}
+  function normalizeString(value) {
+    if (typeof value !== 'string') {
+      return null;
     }
 
-    // Strategy 2: Direct attribute lookup (legacy long IDs)
-    var el = document.querySelector('[data-ai-internal-id="' + elementId + '"]');
-    if (el) return el;
+    var trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
 
-    // Strategy 3: Try as HTML id
-    return document.getElementById(elementId);
+  function limitString(value, maxLength) {
+    var normalized = normalizeString(value);
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+
+    return normalized.slice(0, maxLength) + '...';
+  }
+
+  function roleSelectorFor(role) {
+    if (role === 'textbox') {
+      return 'input, textarea, [role="textbox"], [contenteditable], [contenteditable="true"]';
+    }
+    if (role === 'button') {
+      return 'button, [role="button"]';
+    }
+    if (role === 'link') {
+      return 'a[href], [role="link"]';
+    }
+    if (role === 'combobox') {
+      return 'select, [role="combobox"]';
+    }
+    return role ? '[role="' + role + '"]' : '*';
+  }
+
+  function getElementLabel(element) {
+    if (!element) {
+      return null;
+    }
+
+    return (
+      normalizeString(element.getAttribute('aria-label')) ||
+      normalizeString(element.getAttribute('placeholder')) ||
+      normalizeString(element.getAttribute('title')) ||
+      limitString(
+        typeof element.innerText === 'string'
+          ? element.innerText
+          : element.textContent || '',
+        160
+      )
+    );
+  }
+
+  function getElementText(element) {
+    if (!element) {
+      return null;
+    }
+
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      return limitString(element.value || '', 160);
+    }
+
+    return limitString(
+      typeof element.innerText === 'string'
+        ? element.innerText
+        : element.textContent || '',
+      160
+    );
+  }
+
+  function summarizeElement(element, selectorHint, captureRaw) {
+    if (!element) {
+      return null;
+    }
+
+    return {
+      domId: normalizeString(element.getAttribute(NODE_ID_ATTR)),
+      htmlId: normalizeString(element.getAttribute('id')),
+      label: captureRaw ? getElementLabel(element) : null,
+      role: normalizeString(element.getAttribute('role')),
+      selector: selectorHint || null,
+      tagName: element.tagName ? element.tagName.toLowerCase() : null,
+      text: captureRaw ? getElementText(element) : null,
+    };
+  }
+
+  function summarizeCandidates(nodeList, selectorHint, captureRaw, limit) {
+    var summaries = [];
+    var size = Math.min(nodeList.length, limit);
+    for (var i = 0; i < size; i++) {
+      summaries.push(summarizeElement(nodeList[i], selectorHint, captureRaw));
+    }
+    return summaries;
+  }
+
+  function matchesLabel(expectedLabel, actualLabel, sliceLength) {
+    if (!expectedLabel || !actualLabel) {
+      return false;
+    }
+
+    return actualLabel
+      .toLowerCase()
+      .indexOf(expectedLabel.substring(0, sliceLength).toLowerCase()) !== -1;
+  }
+
+  function inferTargetKind(elementId) {
+    if (/^e\\d+$/.test(elementId)) {
+      return 'short_ref';
+    }
+    if (/^ai-/.test(elementId)) {
+      return 'dom_id';
+    }
+    return 'unknown';
+  }
+
+  function getCaptureRaw() {
+    return Boolean(
+      window.__MUNINN_ACTIONS__ &&
+        window.__MUNINN_ACTIONS__.debugOptions &&
+        window.__MUNINN_ACTIONS__.debugOptions.captureRaw
+    );
+  }
+
+  function resolveElement(elementId) {
+    var refMap = window.__MUNINN_REF_MAP__ || {};
+    var entry = refMap[elementId] || null;
+    var targetKind = inferTargetKind(elementId);
+    var attempts = [];
+    var captureRaw = getCaptureRaw();
+    var matchedElement = null;
+
+    function pushAttempt(strategy, candidates, matched, reason, selectorHint) {
+      var matchedCandidate = matched
+        ? summarizeElement(matched, selectorHint || null, captureRaw)
+        : null;
+
+      attempts.push({
+        candidateCount: candidates ? candidates.length : 0,
+        candidates: candidates
+          ? summarizeCandidates(candidates, selectorHint || null, captureRaw, 5)
+          : [],
+        matched: Boolean(matched),
+        matchedCandidate: matchedCandidate,
+        reason: reason || null,
+        strategy: strategy,
+      });
+    }
+
+    if (entry) {
+      var attrMatch = document.querySelector(
+        '[' + NODE_ID_ATTR + '="' + entry.domId + '"]'
+      );
+      if (attrMatch) {
+        matchedElement = attrMatch;
+        pushAttempt('ref.dom_id', [attrMatch], attrMatch, null, entry.selector || null);
+      } else {
+        pushAttempt('ref.dom_id', [], null, 'No live node with the stored DOM id.', null);
+      }
+
+      if (!matchedElement) {
+        try {
+          var selectorCandidates = document.querySelectorAll(entry.selector);
+          var selectorWinner = null;
+          for (var i = 0; i < selectorCandidates.length; i++) {
+            var selectorCandidate = selectorCandidates[i];
+            var selectorLabel = getElementLabel(selectorCandidate);
+            if (
+              (entry.label && matchesLabel(entry.label, selectorLabel, 30)) ||
+              (!entry.label && selectorCandidates.length === 1)
+            ) {
+              selectorWinner = selectorCandidate;
+              selectorWinner.setAttribute(NODE_ID_ATTR, entry.domId);
+              break;
+            }
+          }
+          if (selectorWinner) {
+            matchedElement = selectorWinner;
+            pushAttempt(
+              'ref.selector_label',
+              selectorCandidates,
+              selectorWinner,
+              null,
+              entry.selector || null
+            );
+          } else {
+            pushAttempt(
+              'ref.selector_label',
+              selectorCandidates,
+              null,
+              entry.label
+                ? 'Selector candidates did not match the observed label.'
+                : 'Selector candidates were ambiguous.',
+              entry.selector || null
+            );
+          }
+        } catch (error) {
+          pushAttempt(
+            'ref.selector_label',
+            [],
+            null,
+            error && typeof error.message === 'string'
+              ? error.message
+              : 'Selector lookup failed.',
+            entry.selector || null
+          );
+        }
+      }
+
+      if (!matchedElement) {
+        try {
+          var roleSelector = roleSelectorFor(entry.role);
+          var roleCandidates = document.querySelectorAll(roleSelector);
+          var roleWinner = null;
+          for (var r = 0; r < roleCandidates.length; r++) {
+            var roleCandidate = roleCandidates[r];
+            var roleLabel = getElementLabel(roleCandidate);
+            if (
+              (entry.label && matchesLabel(entry.label, roleLabel, 20)) ||
+              (!entry.label && roleCandidates.length === 1)
+            ) {
+              roleWinner = roleCandidate;
+              if (!roleWinner.getAttribute(NODE_ID_ATTR)) {
+                roleWinner.setAttribute(NODE_ID_ATTR, entry.domId);
+              }
+              break;
+            }
+          }
+          if (roleWinner) {
+            matchedElement = roleWinner;
+            pushAttempt('ref.role_label', roleCandidates, roleWinner, null, roleSelector);
+          } else {
+            pushAttempt(
+              'ref.role_label',
+              roleCandidates,
+              null,
+              entry.label
+                ? 'Role candidates did not match the observed label.'
+                : 'Role candidates were ambiguous.',
+              roleSelector
+            );
+          }
+        } catch (error) {
+          pushAttempt(
+            'ref.role_label',
+            [],
+            null,
+            error && typeof error.message === 'string'
+              ? error.message
+              : 'Role lookup failed.',
+            null
+          );
+        }
+      }
+    }
+
+    if (!matchedElement) {
+      var legacyMatch = document.querySelector(
+        '[' + NODE_ID_ATTR + '="' + elementId + '"]'
+      );
+      if (legacyMatch) {
+        matchedElement = legacyMatch;
+        pushAttempt('legacy.dom_id', [legacyMatch], legacyMatch, null, null);
+      } else {
+        pushAttempt('legacy.dom_id', [], null, 'No element matched the direct DOM id.', null);
+      }
+    }
+
+    if (!matchedElement) {
+      var htmlIdMatch = document.getElementById(elementId);
+      if (htmlIdMatch) {
+        matchedElement = htmlIdMatch;
+        pushAttempt('legacy.html_id', [htmlIdMatch], htmlIdMatch, null, null);
+      } else {
+        pushAttempt('legacy.html_id', [], null, 'No element matched the HTML id.', null);
+      }
+    }
+
+    var targetState;
+    if (matchedElement && entry) {
+      targetState = 'known_ref';
+    } else if (matchedElement) {
+      targetState = 'legacy_dom_id';
+    } else if (entry) {
+      targetState = 'stale_ref';
+    } else if (targetKind === 'dom_id') {
+      targetState = 'stale_ref';
+    } else {
+      targetState = 'unknown_ref';
+    }
+
+    return {
+      debug: {
+        attempts: attempts,
+        matchedCandidate: summarizeElement(
+          matchedElement,
+          entry ? entry.selector || null : null,
+          captureRaw
+        ),
+        refEntry: entry
+          ? {
+              domId: entry.domId,
+              label: captureRaw ? entry.label || '' : '',
+              role: entry.role,
+              selector: entry.selector,
+            }
+          : null,
+        targetId: elementId,
+        targetKind: targetKind,
+        targetState: targetState,
+      },
+      element: matchedElement,
+      reason:
+        targetState === 'unknown_ref'
+          ? 'Unknown ref: ' + elementId
+          : 'Element not found: ' + elementId,
+    };
+  }
+
+  function buildActionDebug(action, params, resolution) {
+    return {
+      jsCall: null,
+      matchedElement: resolution.debug.matchedCandidate,
+      requestedAction: action,
+      requestedParams: params,
+      resolver: resolution.debug,
+      targetState: resolution.debug.targetState,
+    };
+  }
+
+  function buildActionFailure(action, params, resolution, reason) {
+    return {
+      ok: false,
+      reason: reason || resolution.reason,
+      debug: buildActionDebug(action, params, resolution),
+    };
+  }
+
+  function buildActionSuccess(action, params, resolution, reason) {
+    return {
+      ok: true,
+      reason: reason || null,
+      debug: buildActionDebug(action, params, resolution),
+    };
   }
 
   function dispatchMouseEvents(el) {
@@ -77,24 +369,95 @@ export const ACTIONS_INJECTION_SCRIPT = `
   }
 
   window.__MUNINN_ACTIONS__ = {
+    debugOptions: {
+      captureRaw: false,
+    },
+
+    setDebugOptions: function(options) {
+      this.debugOptions = {
+        captureRaw: Boolean(options && options.captureRaw),
+      };
+      return this.debugOptions;
+    },
+
+    resolveOnly: function(elementId) {
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) {
+        return buildActionFailure('resolve_only', { id: elementId }, resolution, resolution.reason);
+      }
+      return buildActionSuccess('resolve_only', { id: elementId }, resolution, null);
+    },
+
+    getDebugState: function() {
+      var refMap = window.__MUNINN_REF_MAP__ || {};
+      var knownRefIds = Object.keys(refMap);
+      var liveRefIds = [];
+      for (var i = 0; i < knownRefIds.length; i++) {
+        var refId = knownRefIds[i];
+        var refEntry = refMap[refId];
+        if (!refEntry || !refEntry.domId) continue;
+        if (document.querySelector('[' + NODE_ID_ATTR + '="' + refEntry.domId + '"]')) {
+          liveRefIds.push(refId);
+        }
+      }
+
+      return {
+        activeElementTag:
+          document.activeElement && document.activeElement.tagName
+            ? document.activeElement.tagName.toLowerCase()
+            : null,
+        knownRefCount: knownRefIds.length,
+        knownRefIds: knownRefIds.slice(0, 50),
+        liveRefCount: liveRefIds.length,
+        liveRefIds: liveRefIds.slice(0, 50),
+        readyState: document.readyState,
+        url: window.location.href,
+      };
+    },
+
     click: function(elementId) {
-      var el = findById(elementId);
-      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
-      el.scrollIntoView({ block: 'center', behavior: 'instant' });
-      dispatchMouseEvents(el);
-      return { ok: true, reason: null };
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) return buildActionFailure('click', { id: elementId }, resolution, resolution.reason);
+      resolution.element.scrollIntoView({ block: 'center', behavior: 'instant' });
+      dispatchMouseEvents(resolution.element);
+      return buildActionSuccess('click', { id: elementId }, resolution, null);
     },
 
     tapCoordinates: function(x, y) {
       var el = document.elementFromPoint(x, y);
-      if (!el) return { ok: false, reason: 'No element at (' + x + ', ' + y + ')' };
+      if (!el) {
+        return {
+          ok: false,
+          reason: 'No element at (' + x + ', ' + y + ')',
+          debug: {
+            jsCall: null,
+            matchedElement: null,
+            requestedAction: 'tap_coordinates',
+            requestedParams: { x: x, y: y },
+            resolver: null,
+            targetState: null,
+          },
+        };
+      }
       dispatchMouseEvents(el);
-      return { ok: true, reason: null };
+      return {
+        ok: true,
+        reason: null,
+        debug: {
+          jsCall: null,
+          matchedElement: summarizeElement(el, null, getCaptureRaw()),
+          requestedAction: 'tap_coordinates',
+          requestedParams: { x: x, y: y },
+          resolver: null,
+          targetState: null,
+        },
+      };
     },
 
     type: function(elementId, text) {
-      var el = findById(elementId);
-      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) return buildActionFailure('type', { id: elementId, text: text }, resolution, resolution.reason);
+      var el = resolution.element;
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       dispatchMouseEvents(el);
       el.focus();
@@ -114,24 +477,23 @@ export const ACTIONS_INJECTION_SCRIPT = `
           el.textContent = text;
         }
       } catch (e) {
-        // Fallback: simulate typing character by character via keyboard events.
         for (var i = 0; i < text.length; i++) {
           var ch = text[i];
           el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
           el.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }));
           el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
         }
-        // Also try direct assignment as last resort.
         try { el.value = text; } catch (_) {}
       }
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true, reason: null };
+      return buildActionSuccess('type', { id: elementId, text: text }, resolution, null);
     },
 
     fill: function(elementId, text) {
-      var el = findById(elementId);
-      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) return buildActionFailure('fill', { id: elementId, text: text }, resolution, resolution.reason);
+      var el = resolution.element;
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       dispatchMouseEvents(el);
       el.focus();
@@ -155,20 +517,24 @@ export const ACTIONS_INJECTION_SCRIPT = `
       }
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true, reason: null };
+      return buildActionSuccess('fill', { id: elementId, text: text }, resolution, null);
     },
 
     select: function(elementId, value) {
-      var el = findById(elementId);
-      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) return buildActionFailure('select', { id: elementId, value: value }, resolution, resolution.reason);
+      var el = resolution.element;
       if (!(el instanceof HTMLSelectElement)) {
-        // Fallback: click the element (e.g. custom dropdown/autocomplete item).
         el.scrollIntoView({ block: 'center', behavior: 'instant' });
         dispatchMouseEvents(el);
-        return { ok: true, reason: 'Clicked non-select element as fallback' };
+        return buildActionSuccess(
+          'select',
+          { id: elementId, value: value },
+          resolution,
+          'Clicked non-select element as fallback'
+        );
       }
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
-      // Try matching by value first, then by visible text.
       var found = false;
       for (var i = 0; i < el.options.length; i++) {
         if (el.options[i].value === value || el.options[i].text === value) {
@@ -178,7 +544,6 @@ export const ACTIONS_INJECTION_SCRIPT = `
         }
       }
       if (!found) {
-        // Fuzzy match: case-insensitive contains.
         var lower = value.toLowerCase();
         for (var j = 0; j < el.options.length; j++) {
           if (el.options[j].text.toLowerCase().indexOf(lower) !== -1) {
@@ -189,23 +554,37 @@ export const ACTIONS_INJECTION_SCRIPT = `
         }
       }
       if (!found) {
-        return { ok: false, reason: 'No matching option for: ' + value };
+        return buildActionFailure(
+          'select',
+          { id: elementId, value: value },
+          resolution,
+          'No matching option for: ' + value
+        );
       }
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true, reason: null };
+      return buildActionSuccess('select', { id: elementId, value: value }, resolution, null);
     },
 
     waitForCondition: function(condition, timeoutMs) {
-      // Returns a promise that resolves when condition is met or timeout.
-      // Conditions: 'idle' (default), 'url:pattern', 'selector:css', 'text:substring'
       timeoutMs = timeoutMs || 3000;
       condition = condition || 'idle';
       return new Promise(function(resolve) {
         var start = Date.now();
         function check() {
           if (Date.now() - start > timeoutMs) {
-            return resolve({ ok: true, reason: 'timeout' });
+            return resolve({
+              ok: true,
+              reason: 'timeout',
+              debug: {
+                jsCall: null,
+                matchedElement: null,
+                requestedAction: 'wait',
+                requestedParams: { condition: condition, timeout: timeoutMs },
+                resolver: null,
+                targetState: null,
+              },
+            });
           }
           var met = false;
           if (condition === 'idle') {
@@ -220,7 +599,18 @@ export const ACTIONS_INJECTION_SCRIPT = `
             met = true;
           }
           if (met) {
-            return resolve({ ok: true, reason: null });
+            return resolve({
+              ok: true,
+              reason: null,
+              debug: {
+                jsCall: null,
+                matchedElement: null,
+                requestedAction: 'wait',
+                requestedParams: { condition: condition, timeout: timeoutMs },
+                resolver: null,
+                targetState: null,
+              },
+            });
           }
           setTimeout(check, 200);
         }
@@ -229,8 +619,9 @@ export const ACTIONS_INJECTION_SCRIPT = `
     },
 
     hover: function(elementId) {
-      var el = findById(elementId);
-      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) return buildActionFailure('hover', { id: elementId }, resolution, resolution.reason);
+      var el = resolution.element;
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       var rect = el.getBoundingClientRect();
       var cx = rect.left + rect.width / 2;
@@ -239,20 +630,21 @@ export const ACTIONS_INJECTION_SCRIPT = `
       el.dispatchEvent(new MouseEvent('mouseenter', opts));
       el.dispatchEvent(new MouseEvent('mouseover', opts));
       el.dispatchEvent(new MouseEvent('mousemove', opts));
-      return { ok: true, reason: null };
+      return buildActionSuccess('hover', { id: elementId }, resolution, null);
     },
 
     focus: function(elementId) {
-      var el = findById(elementId);
-      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
-      el.scrollIntoView({ block: 'center', behavior: 'instant' });
-      el.focus();
-      return { ok: true, reason: null };
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) return buildActionFailure('focus', { id: elementId }, resolution, resolution.reason);
+      resolution.element.scrollIntoView({ block: 'center', behavior: 'instant' });
+      resolution.element.focus();
+      return buildActionSuccess('focus', { id: elementId }, resolution, null);
     },
 
     gettext: function(elementId) {
-      var el = findById(elementId);
-      if (!el) return { ok: false, reason: 'Element not found: ' + elementId };
+      var resolution = resolveElement(elementId);
+      if (!resolution.element) return buildActionFailure('gettext', { id: elementId }, resolution, resolution.reason);
+      var el = resolution.element;
       var text = '';
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
         text = el.value || '';
@@ -262,8 +654,7 @@ export const ACTIONS_INJECTION_SCRIPT = `
       } else {
         text = (typeof el.innerText === 'string' ? el.innerText : el.textContent) || '';
       }
-      text = text.trim();
-      return { ok: true, reason: text || '(empty)' };
+      return buildActionSuccess('gettext', { id: elementId }, resolution, text.trim() || '(empty)');
     },
 
     scroll: function(direction, amount) {
@@ -277,18 +668,32 @@ export const ACTIONS_INJECTION_SCRIPT = `
       else if (direction === 'right') dx = px;
       else if (direction === 'left') dx = -px;
       window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
-      return { ok: true, reason: null };
+      return {
+        ok: true,
+        reason: null,
+        debug: {
+          jsCall: null,
+          matchedElement: null,
+          requestedAction: 'scroll',
+          requestedParams: { direction: direction, amount: amount },
+          resolver: null,
+          targetState: null,
+        },
+      };
     },
 
-    /** Lightweight post-action snapshot for validation (issue #7). */
     captureValidationState: function() {
       var ids = [];
       var bounds = {};
       var roles = {};
-      var els = document.querySelectorAll('[data-ai-internal-id]');
+      var refMap = window.__MUNINN_REF_MAP__ || {};
+      var knownRefIds = Object.keys(refMap);
+      var liveRefIds = [];
+      var refToDomId = {};
+      var els = document.querySelectorAll('[' + NODE_ID_ATTR + ']');
       for (var i = 0; i < els.length; i++) {
         var el = els[i];
-        var id = el.getAttribute('data-ai-internal-id');
+        var id = el.getAttribute(NODE_ID_ATTR);
         if (!id) continue;
         ids.push(id);
         var rect = el.getBoundingClientRect();
@@ -296,9 +701,29 @@ export const ACTIONS_INJECTION_SCRIPT = `
         var role = el.getAttribute('role') || '';
         if (role) roles[id] = role;
       }
-      var focused = document.activeElement;
+      for (var j = 0; j < knownRefIds.length; j++) {
+        var refId = knownRefIds[j];
+        var entry = refMap[refId];
+        if (!entry || !entry.domId) continue;
+        refToDomId[refId] = entry.domId;
+        if (document.querySelector('[' + NODE_ID_ATTR + '="' + entry.domId + '"]')) {
+          liveRefIds.push(refId);
+        }
+      }
 
-      // Detect visible dialog/modal elements in the DOM.
+      var focused = document.activeElement;
+      var focusedElementId = focused ? focused.getAttribute(NODE_ID_ATTR) : null;
+      var activeShortRef = null;
+      if (focusedElementId) {
+        for (var k = 0; k < knownRefIds.length; k++) {
+          var knownRefId = knownRefIds[k];
+          if (refMap[knownRefId] && refMap[knownRefId].domId === focusedElementId) {
+            activeShortRef = knownRefId;
+            break;
+          }
+        }
+      }
+
       var hasDialog = false;
       var dialogEls = document.querySelectorAll(
         'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
@@ -313,12 +738,16 @@ export const ACTIONS_INJECTION_SCRIPT = `
       }
 
       return {
-        scrollY: window.scrollY,
-        axNodeIds: ids,
+        activeShortRef: activeShortRef,
         axNodeBounds: bounds,
+        axNodeIds: ids,
         axNodeRoles: roles,
-        focusedElementId: focused ? focused.getAttribute('data-ai-internal-id') : null,
-        hasDialog: hasDialog
+        focusedElementId: focusedElementId,
+        hasDialog: hasDialog,
+        knownRefIds: knownRefIds,
+        liveRefIds: liveRefIds,
+        refToDomId: refToDomId,
+        scrollY: window.scrollY,
       };
     }
   };

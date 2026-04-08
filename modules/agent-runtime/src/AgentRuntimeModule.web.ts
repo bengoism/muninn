@@ -17,9 +17,13 @@ class AgentRuntimeModule extends NativeModule {
         status: 'replay',
         message: `Web stub received goal "${request.goal}" with ${request.axSnapshot.length} accessibility nodes.`,
       },
+      planUpdates: null,
       backend: 'web-stub',
       diagnostics: {
         actionHistoryCount: request.actionHistory.length,
+        planningContextReasons: request.planningContext?.reasons ?? [],
+        planningImageProvided: request.planningContext !== null,
+        planPhase: request.sessionPlan?.phase ?? null,
         screenshotUri: request.screenshotUri,
       },
     };

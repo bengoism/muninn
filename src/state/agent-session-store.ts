@@ -5,6 +5,8 @@ import type {
   AgentActionRecord,
   InferenceResponse,
   LoopState,
+  PlanningContextDebugRequest,
+  SessionPlan,
   StopReason,
 } from '../types/agent';
 
@@ -17,6 +19,8 @@ type AgentSessionState = {
   lastError: string | null;
   stopReason: StopReason | null;
   actionHistory: AgentActionRecord[];
+  plan: SessionPlan | null;
+  lastPlanningContextRequest: PlanningContextDebugRequest | null;
   stepCount: number;
   sessionId: string | null;
 
@@ -25,6 +29,10 @@ type AgentSessionState = {
   setLastNativeResponse: (response: InferenceResponse | null) => void;
   setLastError: (error: string | null) => void;
   setStopReason: (reason: StopReason | null) => void;
+  setPlan: (plan: SessionPlan | null) => void;
+  setLastPlanningContextRequest: (
+    request: PlanningContextDebugRequest | null
+  ) => void;
   addActionRecord: (record: AgentActionRecord) => void;
   incrementStep: () => void;
   resetSession: () => void;
@@ -37,6 +45,8 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
   lastError: null,
   stopReason: null,
   actionHistory: [],
+  plan: null,
+  lastPlanningContextRequest: null,
   stepCount: 0,
   sessionId: null,
 
@@ -45,6 +55,9 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
   setLastNativeResponse: (lastNativeResponse) => set({ lastNativeResponse }),
   setLastError: (lastError) => set({ lastError }),
   setStopReason: (stopReason) => set({ stopReason }),
+  setPlan: (plan) => set({ plan }),
+  setLastPlanningContextRequest: (lastPlanningContextRequest) =>
+    set({ lastPlanningContextRequest }),
 
   addActionRecord: (record) =>
     set((state) => ({
@@ -61,6 +74,8 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
       lastError: null,
       stopReason: null,
       actionHistory: [],
+      plan: null,
+      lastPlanningContextRequest: null,
       stepCount: 0,
       sessionId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
     }),

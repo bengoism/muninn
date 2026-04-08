@@ -1,4 +1,8 @@
-import type { Bounds, ToolName } from '../../../types/agent';
+import type {
+  Bounds,
+  ObservationRefEntry,
+  ToolName,
+} from '../../../types/agent';
 
 export type ToolParamSchema = Record<
   string,
@@ -10,6 +14,7 @@ export type ToolResult = {
   action: ToolName;
   reason: string | null;
   durationMs: number;
+  debug?: ToolExecutionDebug | null;
 };
 
 export type ToolDefinition = {
@@ -38,11 +43,15 @@ export type ValidationSnapshot = {
   isLoading: boolean;
   scrollY: number;
   axNodeIds: Set<string>;
+  activeShortRef: string | null;
   axNodeBounds: Map<string, Bounds>;
   axNodeRoles: Map<string, string>;
   axNodeCount: number;
   focusedElementId: string | null;
   hasDialog: boolean;
+  knownRefIds: Set<string>;
+  liveRefIds: Set<string>;
+  refToDomId: Map<string, string>;
   timestamp: number;
 };
 
@@ -52,6 +61,7 @@ export type ValidationSignals = {
   scrollChanged: boolean;
   axDelta: { added: number; removed: number; total: number };
   targetStillPresent: boolean | null;
+  targetWasKnown: boolean | null;
   focusChanged: boolean;
 };
 
@@ -68,3 +78,48 @@ export type RetryDirective =
       fallbackAction: ToolName;
       fallbackParams: Record<string, unknown>;
     };
+
+export type TargetReferenceKind = 'short_ref' | 'dom_id' | 'unknown';
+
+export type TargetReferenceState =
+  | 'known_ref'
+  | 'legacy_dom_id'
+  | 'stale_ref'
+  | 'unknown_ref';
+
+export type LocatorCandidateSummary = {
+  domId: string | null;
+  htmlId: string | null;
+  label: string | null;
+  role: string | null;
+  selector: string | null;
+  tagName: string | null;
+  text: string | null;
+};
+
+export type LocatorStrategyTrace = {
+  candidateCount: number;
+  candidates: LocatorCandidateSummary[];
+  matched: boolean;
+  matchedCandidate: LocatorCandidateSummary | null;
+  reason: string | null;
+  strategy: string;
+};
+
+export type LocatorResolutionTrace = {
+  attempts: LocatorStrategyTrace[];
+  matchedCandidate: LocatorCandidateSummary | null;
+  refEntry: ObservationRefEntry | null;
+  targetId: string;
+  targetKind: TargetReferenceKind;
+  targetState: TargetReferenceState;
+};
+
+export type ToolExecutionDebug = {
+  jsCall: string | null;
+  matchedElement: LocatorCandidateSummary | null;
+  requestedAction: ToolName | 'resolve_only';
+  requestedParams: Record<string, unknown>;
+  resolver: LocatorResolutionTrace | null;
+  targetState: TargetReferenceState | null;
+};
