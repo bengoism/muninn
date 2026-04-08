@@ -12,6 +12,8 @@ class AgentRuntimeModule : Module() {
       val screenshotUri = request["screenshotUri"] as? String ?: ""
       val axSnapshot = request["axSnapshot"] as? List<*> ?: emptyList<Any>()
       val actionHistory = request["actionHistory"] as? List<*> ?: emptyList<Any>()
+      val sessionPlan = request["sessionPlan"] as? Map<*, *>
+      val planningContext = request["planningContext"] as? Map<*, *>
 
       mapOf(
         "ok" to true,
@@ -20,9 +22,13 @@ class AgentRuntimeModule : Module() {
           "status" to "replay",
           "message" to "Native bridge ready for goal '$goal'. Screenshot: $screenshotUri. AX nodes: ${axSnapshot.size}. Prior actions: ${actionHistory.size}."
         ),
+        "planUpdates" to null,
         "backend" to "android-stub",
         "diagnostics" to mapOf(
           "actionHistoryCount" to actionHistory.size,
+          "planningContextReasons" to (planningContext?.get("reasons") ?: emptyList<String>()),
+          "planningImageProvided" to (planningContext != null),
+          "planPhase" to sessionPlan?.get("phase"),
           "screenshotUri" to screenshotUri
         )
       )

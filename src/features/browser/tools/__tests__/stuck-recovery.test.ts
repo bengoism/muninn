@@ -32,6 +32,7 @@ function makeValidation(
       scrollChanged: false,
       axDelta: { added: 0, removed: 0, total: 0 },
       targetStillPresent: true,
+      targetWasKnown: true,
       focusChanged: false,
     },
     reason: null,

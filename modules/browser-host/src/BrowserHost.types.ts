@@ -1,5 +1,5 @@
 import type { StyleProp, ViewStyle } from 'react-native';
-import type { ViewportCapture } from '../../../src/types/agent';
+import type { FullPageCapture, ViewportCapture } from '../../../src/types/agent';
 
 export type BrowserHostNavigationStatePayload = {
   canGoBack: boolean;
@@ -53,6 +53,18 @@ export type BrowserHostViewportCaptureOutcome =
       ok: false;
     };
 
+export type BrowserHostFullPageCaptureOutcome =
+  | {
+      ok: true;
+      capture: FullPageCapture;
+    }
+  | {
+      code: 'capture_unavailable' | 'capture_failed' | 'write_failed';
+      details?: unknown;
+      message: string;
+      ok: false;
+    };
+
 export type BrowserHostViewProps = {
   afterContentScript?: string | null;
   bootstrapScript?: string | null;
@@ -72,6 +84,7 @@ export type BrowserHostViewProps = {
 };
 
 export type BrowserHostViewHandle = {
+  captureFullPage: () => Promise<BrowserHostFullPageCaptureOutcome>;
   captureViewport: () => Promise<BrowserHostViewportCaptureOutcome>;
   evaluateJavaScript: (
     source: string

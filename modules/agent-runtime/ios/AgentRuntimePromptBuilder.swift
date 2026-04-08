@@ -19,23 +19,59 @@ final class AgentRuntimePromptBuilder {
     - yield_to_user(reason: string) — ask the user for help
     - finish(status: "success"|"failure", message: string) — task complete
 
-    IMPORTANT: Elements with [ref=...] are interactive. You MUST use the exact ref value (e.g. "ai-main-abc-123") as the "id" parameter. Never use the element's label or description as the id.
+    IMPORTANT: Elements with [ref=...] are interactive. You MUST use the exact short ref value (e.g. "e1") as the "id" parameter. Never use the element's label, description, or a DOM id like "ai-main-abc-123" as the id.
+    If typing into a field has no effect, try clicking or focusing the field, then observe again. If that opens a modal, sheet, fullscreen editor, or expanded picker, retarget the actual active input before typing.
+    Read the current todo list before each step. After choosing the next action, you may optionally propose bounded plan updates in a top-level "plan_updates" array. The runtime validates these updates before applying them.
+    Allowed plan updates:
+    - {"type":"add_item","text":"...", "activate":true|false}
+    - {"type":"set_active_item","id":"todo-results"}
+    - {"type":"complete_item","id":"todo-results","evidence":"..."}
+    - {"type":"reopen_item","id":"todo-form","evidence":"..."}
+    - {"type":"drop_item","id":"todo-model-1","reason":"..."}
+    - {"type":"set_phase","phase":"results","evidence":"..."}
+    Never claim a todo is complete unless the current page already provides evidence.
     """
 
   func buildPrompt(
     for request: AgentRuntimeRequest,
-    screenshot: ScreenshotArtifact
+    screenshot: ScreenshotArtifact,
+    planningScreenshot: ScreenshotArtifact?
   ) -> String {
     var parts: [String] = []
 
-    parts.append("You are a browser agent. You see a screenshot of a webpage and must decide the single next action to achieve the user's goal.")
+    parts.append("You are a browser agent. You see one or two screenshots of a webpage and must decide the single next action to achieve the user's goal.")
+    parts.append("The first image is always the current viewport. If a second image is present, it is a downscaled full-page overview of the same page for planning only.")
     parts.append("If the goal has already been achieved based on what you see, call finish(status: \"success\", message: \"...\").")
     parts.append("Do not keep taking actions after the goal is complete.")
     parts.append("")
     parts.append("Goal: \(request.goal)")
     parts.append("")
+
+    if let planSummary = buildPlanSummary(request.sessionPlan) {
+      parts.append("Current plan:")
+      parts.append(planSummary)
+      parts.append("")
+    }
+
     parts.append("Viewport: \(screenshot.pixelWidth)x\(screenshot.pixelHeight)")
     parts.append("")
+
+    if let planningContext = request.planningContext {
+      parts.append("Planning context:")
+      if let planningScreenshot {
+        parts.append("Full-page overview: \(planningScreenshot.pixelWidth)x\(planningScreenshot.pixelHeight)")
+      } else {
+        parts.append("Full-page overview: requested but unavailable")
+      }
+      if !planningContext.reasons.isEmpty {
+        parts.append("Why richer context was requested: \(planningContext.reasons.joined(separator: ", "))")
+      }
+      if !planningContext.summary.isEmpty {
+        parts.append("Planning summary: \(planningContext.summary)")
+      }
+      parts.append("Use the overview image to understand page layout and off-screen content, but use the viewport image and refs for precise interaction.")
+      parts.append("")
+    }
 
     let axSummary = request.axTreeText.isEmpty
       ? buildAXSummary(request.axSnapshot)
@@ -55,7 +91,7 @@ final class AgentRuntimePromptBuilder {
 
     parts.append(Self.actionSchema)
     parts.append("")
-    parts.append("Respond with exactly one JSON object: {\"action\": \"<name>\", \"parameters\": {<params>}}")
+    parts.append("Respond with exactly one JSON object: {\"action\": \"<name>\", \"parameters\": {<params>}, \"plan_updates\": [optional bounded updates]}")
     parts.append("Do not include any text before or after the JSON.")
 
     return parts.joined(separator: "\n")
@@ -82,6 +118,103 @@ final class AgentRuntimePromptBuilder {
     }
 
     return lines.joined(separator: "\n")
+  }
+
+  private func buildPlanSummary(_ plan: [String: Any]?) -> String? {
+    guard let plan else {
+      return nil
+    }
+
+    var lines: [String] = []
+
+    if let phase = plan["phase"] as? String, !phase.isEmpty {
+      lines.append("Current phase: \(phase)")
+    }
+
+    if
+      let items = plan["items"] as? [[String: Any]],
+      !items.isEmpty
+    {
+      lines.append("Todos:")
+      for item in items.prefix(5) {
+        guard
+          let id = item["id"] as? String,
+          !id.isEmpty,
+          let text = item["text"] as? String,
+          !text.isEmpty
+        else {
+          continue
+        }
+
+        let status = item["status"] as? String ?? "pending"
+        lines.append("- \(id) [\(status)]: \(text)")
+      }
+
+      let activeItemId = plan["activeItemId"] as? String
+      if
+        let activeItemId,
+        let activeItem = items.first(where: { ($0["id"] as? String) == activeItemId }),
+        let activeText = activeItem["text"] as? String,
+        !activeText.isEmpty
+      {
+        lines.append("Active todo: \(activeText)")
+      }
+
+      let completed = items
+        .filter { ($0["status"] as? String) == "completed" }
+        .compactMap { $0["text"] as? String }
+        .prefix(2)
+
+      if !completed.isEmpty {
+        lines.append("Completed: \(completed.joined(separator: "; "))")
+      }
+
+      let pending = items
+        .filter { item in
+          guard let text = item["text"] as? String, !text.isEmpty else {
+            return false
+          }
+          let status = item["status"] as? String ?? ""
+          let id = item["id"] as? String
+          return (status == "pending" || status == "in_progress") && id != activeItemId
+        }
+        .compactMap { $0["text"] as? String }
+        .prefix(2)
+
+      if !pending.isEmpty {
+        lines.append("Pending: \(pending.joined(separator: "; "))")
+      }
+    }
+
+    if
+      let avoidRefs = plan["avoidRefs"] as? [[String: Any]],
+      !avoidRefs.isEmpty
+    {
+      let rendered = avoidRefs.prefix(2).compactMap { entry -> String? in
+        guard let ref = entry["ref"] as? String, !ref.isEmpty else {
+          return nil
+        }
+        let reason = (entry["reason"] as? String)?
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let reason, !reason.isEmpty {
+          return "\(ref) because \(reason)"
+        }
+        return ref
+      }
+
+      if !rendered.isEmpty {
+        lines.append("Avoid for now: \(rendered.joined(separator: "; "))")
+      }
+    }
+
+    if
+      let lastConfirmedProgress = plan["lastConfirmedProgress"] as? String,
+      !lastConfirmedProgress.isEmpty
+    {
+      lines.append("Last confirmed progress: \(lastConfirmedProgress)")
+    }
+
+    return lines.isEmpty ? nil : lines.joined(separator: "\n")
   }
 
   private func buildActionHistory(_ history: [[String: Any]]) -> String {

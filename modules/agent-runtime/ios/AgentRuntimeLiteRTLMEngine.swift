@@ -55,6 +55,7 @@ final class AgentRuntimeLiteRTLMEngine: AgentInferenceEngine {
   func infer(
     request: AgentRuntimeRequest,
     screenshot: ScreenshotArtifact,
+    planningScreenshot: ScreenshotArtifact?,
     prompt: String
   ) throws -> AgentRuntimeSuccess {
     let installation = try modelManager.requireActiveInstallation()
@@ -68,6 +69,7 @@ final class AgentRuntimeLiteRTLMEngine: AgentInferenceEngine {
         prompt: prompt,
         goal: request.goal,
         screenshotPath: screenshot.url.path,
+        planningScreenshotPath: planningScreenshot?.url.path,
         axNodeCount: NSNumber(value: request.axSnapshot.count)
       )
     } catch let adapterError as NSError {
@@ -99,10 +101,14 @@ final class AgentRuntimeLiteRTLMEngine: AgentInferenceEngine {
     diagnostics["activeCommitHash"] = installation.model.commitHash
     diagnostics["activeModelId"] = installation.model.id
     diagnostics["modelPath"] = installation.modelFileURL.path
+    diagnostics["planningContextReasons"] = request.planningContext?.reasons ?? []
+    diagnostics["planningContextSummary"] = request.planningContext?.summary ?? NSNull()
+    diagnostics["planningImageProvided"] = planningScreenshot != nil
 
     return AgentRuntimeSuccess(
       action: action,
       parameters: parameters,
+      planUpdates: response["planUpdates"] as? [[String: Any]],
       backend: "litertlm",
       diagnostics: diagnostics
     )

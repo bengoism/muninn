@@ -9,6 +9,7 @@ function makeSnapshot(
   overrides: Partial<ValidationSnapshot> = {},
 ): ValidationSnapshot {
   return {
+    activeShortRef: null,
     url: 'https://example.com',
     isLoading: false,
     scrollY: 0,
@@ -21,6 +22,9 @@ function makeSnapshot(
     axNodeCount: 2,
     focusedElementId: null,
     hasDialog: false,
+    knownRefIds: new Set(),
+    liveRefIds: new Set(),
+    refToDomId: new Map(),
     timestamp: Date.now(),
     ...overrides,
   };
@@ -37,6 +41,7 @@ function makeValidation(
       scrollChanged: false,
       axDelta: { added: 0, removed: 0, total: 0 },
       targetStillPresent: true,
+      targetWasKnown: true,
       focusChanged: false,
     },
     reason: 'Click executed but no observable state change.',
@@ -62,6 +67,27 @@ describe('getRetryDirective — click', () => {
     if (directive.retry) {
       expect(directive.fallbackAction).toBe('tap_coordinates');
       expect(directive.fallbackParams).toEqual({ x: 60, y: 40 }); // center of 10,20,100,40
+    }
+  });
+
+  it('returns tap_coordinates fallback for short refs via refToDomId mapping', () => {
+    const snapshot = makeSnapshot({
+      axNodeBounds: new Map([
+        ['ai-main-product-18', { x: 25, y: 100, width: 180, height: 120 }],
+      ]),
+      refToDomId: new Map([['e18', 'ai-main-product-18']]),
+    });
+    const directive = getRetryDirective(
+      'click',
+      { id: 'e18' },
+      makeValidation(),
+      0,
+      snapshot,
+    );
+    expect(directive.retry).toBe(true);
+    if (directive.retry) {
+      expect(directive.fallbackAction).toBe('tap_coordinates');
+      expect(directive.fallbackParams).toEqual({ x: 115, y: 160 });
     }
   });
 
@@ -141,7 +167,7 @@ describe('getRetryDirective — click', () => {
 // ---------------------------------------------------------------------------
 
 describe('getRetryDirective — type', () => {
-  it('retries same action on no_op with attempt 0', () => {
+  it('falls back to click on no_op with attempt 0', () => {
     const directive = getRetryDirective(
       'type',
       { id: 'input-2', text: 'hello' },
@@ -151,8 +177,8 @@ describe('getRetryDirective — type', () => {
     );
     expect(directive.retry).toBe(true);
     if (directive.retry) {
-      expect(directive.fallbackAction).toBe('type');
-      expect(directive.fallbackParams).toEqual({ id: 'input-2', text: 'hello' });
+      expect(directive.fallbackAction).toBe('click');
+      expect(directive.fallbackParams).toEqual({ id: 'input-2' });
     }
   });
 
@@ -165,6 +191,21 @@ describe('getRetryDirective — type', () => {
       makeSnapshot(),
     );
     expect(directive.retry).toBe(false);
+  });
+
+  it('falls back to click on unrecoverable with attempt 0', () => {
+    const directive = getRetryDirective(
+      'type',
+      { id: 'input-2', text: 'hello' },
+      makeValidation({ outcome: 'unrecoverable' }),
+      0,
+      makeSnapshot(),
+    );
+    expect(directive.retry).toBe(true);
+    if (directive.retry) {
+      expect(directive.fallbackAction).toBe('click');
+      expect(directive.fallbackParams).toEqual({ id: 'input-2' });
+    }
   });
 });
 

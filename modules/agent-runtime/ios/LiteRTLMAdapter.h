@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
                                                               prompt:(NSString *)prompt
                                                                 goal:(NSString *)goal
                                                       screenshotPath:(NSString *)screenshotPath
+                                              planningScreenshotPath:(nullable NSString *)planningScreenshotPath
                                                          axNodeCount:(NSNumber *)axNodeCount
                                                                error:(NSError * _Nullable * _Nullable)error;
 

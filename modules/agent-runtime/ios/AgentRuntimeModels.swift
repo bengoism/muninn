@@ -23,9 +23,11 @@ struct AgentRuntimeRequest {
   let goal: String
   let screenshotUri: String
   let screenshotUrl: URL
+  let planningContext: AgentRuntimePlanningContext?
   let axSnapshot: [[String: Any]]
   let axTreeText: String
   let actionHistory: [[String: Any]]
+  let sessionPlan: [String: Any]?
   let runtimeMode: RuntimeMode
 
   init(dictionary: [String: Any]) throws {
@@ -72,9 +74,11 @@ struct AgentRuntimeRequest {
     self.goal = goal
     self.screenshotUri = screenshotUri
     self.screenshotUrl = screenshotUrl
+    self.planningContext = try AgentRuntimePlanningContext(dictionary: dictionary["planningContext"])
     self.axSnapshot = dictionary["axSnapshot"] as? [[String: Any]] ?? []
     self.axTreeText = dictionary["axTreeText"] as? String ?? ""
     self.actionHistory = dictionary["actionHistory"] as? [[String: Any]] ?? []
+    self.sessionPlan = dictionary["sessionPlan"] as? [String: Any]
     self.runtimeMode = runtimeMode
   }
 }
@@ -85,9 +89,43 @@ struct ScreenshotArtifact {
   let pixelHeight: Int
 }
 
+struct AgentRuntimePlanningContext {
+  let fullPageScreenshotUri: String
+  let fullPageScreenshotUrl: URL
+  let reasons: [String]
+  let summary: String
+
+  init?(dictionary: Any?) throws {
+    guard let dictionary = dictionary as? [String: Any] else {
+      return nil
+    }
+
+    guard
+      let fullPageScreenshotUri = dictionary["fullPageScreenshotUri"] as? String,
+      let fullPageScreenshotUrl = URL(string: fullPageScreenshotUri),
+      fullPageScreenshotUrl.isFileURL
+    else {
+      throw AgentRuntimeFailure(
+        code: .invalidRequest,
+        message: "The planningContext must provide a valid fullPageScreenshotUri file URL.",
+        details: [
+          "planningContext": dictionary
+        ],
+        backend: "bridge"
+      )
+    }
+
+    self.fullPageScreenshotUri = fullPageScreenshotUri
+    self.fullPageScreenshotUrl = fullPageScreenshotUrl
+    self.reasons = dictionary["reasons"] as? [String] ?? []
+    self.summary = dictionary["summary"] as? String ?? ""
+  }
+}
+
 struct AgentRuntimeSuccess {
   let action: String
   let parameters: [String: Any]
+  let planUpdates: [[String: Any]]?
   let backend: String
   let diagnostics: [String: Any]?
 
@@ -96,6 +134,7 @@ struct AgentRuntimeSuccess {
       "ok": true,
       "action": action,
       "parameters": parameters,
+      "planUpdates": planUpdates ?? NSNull(),
       "backend": backend,
       "diagnostics": diagnostics ?? NSNull()
     ]

@@ -46,6 +46,10 @@ public class BrowserHostModule: Module {
         view.captureViewport(promise: promise)
       }
 
+      AsyncFunction("captureFullPage") { (view: BrowserHostView, promise: Promise) in
+        view.captureFullPage(promise: promise)
+      }
+
       AsyncFunction("goBack") { (view: BrowserHostView) -> NSNull in
         view.goBack()
         return NSNull()

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -14,6 +14,7 @@ import {
 
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useChatStore, type ChatMessage } from '../../../state/chat-store';
+import { useDebugStore } from '../../../state/debug-store';
 
 type Tab = 'chat' | 'debug';
 
@@ -136,11 +137,14 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
   const setGoal = useAgentSessionStore((s) => s.setGoal);
   const loopState = useAgentSessionStore((s) => s.loopState);
   const messages = useChatStore((s) => s.messages);
+  const actionTraces = useDebugStore((s) => s.actionTraces);
+  const lastLocatorProbe = useDebugStore((s) => s.lastLocatorProbe);
+  const consoleMessages = useDebugStore((s) => s.consoleMessages);
+  const networkEvents = useDebugStore((s) => s.networkEvents);
 
   const isTerminal = loopState === 'finished' || loopState === 'yielded' || loopState === 'failed';
-  const isExpanded = currentHeight.current > SNAP_COLLAPSED;
 
-  const animateTo = (target: number) => {
+  const animateTo = useCallback((target: number) => {
     currentHeight.current = target;
     Animated.spring(heightAnim, {
       toValue: target,
@@ -148,7 +152,7 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
       tension: 65,
       friction: 11,
     }).start();
-  };
+  }, [heightAnim]);
 
   const dragStart = useRef(SNAP_COLLAPSED);
 
@@ -182,7 +186,7 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
     if (isRunning && currentHeight.current === SNAP_COLLAPSED) {
       animateTo(SNAP_HALF);
     }
-  }, [isRunning]);
+  }, [animateTo, isRunning]);
 
   useEffect(() => {
     if (messages.length > 0 && currentHeight.current > SNAP_COLLAPSED) {
@@ -267,10 +271,60 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
           <View style={styles.empty}><Text style={styles.emptyText}>Agent activity will appear here</Text></View>
         )
       ) : (
-        <View style={styles.empty}><Text style={styles.emptyText}>Debug telemetry coming soon</Text></View>
+        <View style={styles.debugContent}>
+          <Text style={styles.debugTitle}>Last action</Text>
+          <Text style={styles.debugText}>
+            {formatLastActionTrace(actionTraces[actionTraces.length - 1] ?? null)}
+          </Text>
+          <Text style={styles.debugTitle}>Last locator probe</Text>
+          <Text style={styles.debugText}>
+            {lastLocatorProbe
+              ? `${lastLocatorProbe.targetId} | ${lastLocatorProbe.ok ? 'ok' : 'failed'} | ${lastLocatorProbe.reason ?? 'None'}`
+              : 'Not run'}
+          </Text>
+          <Text style={styles.debugTitle}>Console</Text>
+          <Text style={styles.debugText}>
+            {consoleMessages.length > 0
+              ? consoleMessages
+                  .slice(-5)
+                  .map((message) => `${message.payload.level}: ${message.payload.args.map((arg) => JSON.stringify(arg)).join(' ')}`)
+                  .join('\n')
+              : 'None'}
+          </Text>
+          <Text style={styles.debugTitle}>Network</Text>
+          <Text style={styles.debugText}>
+            {networkEvents.length > 0
+              ? networkEvents
+                  .slice(-5)
+                  .map((event) => `${event.payload.transport}:${event.payload.phase} ${event.payload.method} ${event.payload.url}`)
+                  .join('\n')
+              : 'None'}
+          </Text>
+        </View>
       )}
     </Animated.View>
   );
+}
+
+function formatLastActionTrace(
+  trace: ReturnType<typeof useDebugStore.getState>['actionTraces'][number] | null
+) {
+  if (!trace) {
+    return 'None';
+  }
+
+  return [
+    `step ${trace.step} | ${trace.action}`,
+    trace.targetState ? `target=${trace.targetState}` : null,
+    trace.executor
+      ? `executor=${trace.executor.ok ? 'ok' : 'failed'} | ${trace.executor.reason ?? 'None'}`
+      : null,
+    trace.validation
+      ? `validation=${trace.validation.outcome} | ${trace.validation.reason ?? 'None'}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 const styles = StyleSheet.create({
@@ -318,6 +372,9 @@ const styles = StyleSheet.create({
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   thinkingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#555', opacity: 0.6 },
   thinkingText: { color: '#555', fontSize: 13, fontStyle: 'italic' },
+  debugContent: { flex: 1, paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
+  debugTitle: { color: '#888', fontSize: 11, fontWeight: '600', letterSpacing: 0.8 },
+  debugText: { color: '#666', fontSize: 12, lineHeight: 17, fontFamily: 'Menlo' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 24 },
   emptyText: { color: '#555', fontSize: 13 },
 });

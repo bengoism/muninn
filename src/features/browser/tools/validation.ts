@@ -1,9 +1,8 @@
 import type { Bounds, ToolName } from '../../../types/agent';
 import { useBrowserStore } from '../../../state/browser-store';
 import type { BrowserWebViewHandle } from '../components/BrowserWebView';
-import { ACTIONS_INJECTION_SCRIPT } from './actions';
+import { ensureActionsInjected } from './executor';
 import type {
-  ActionOutcome,
   ToolResult,
   ValidationResult,
   ValidationSignals,
@@ -15,27 +14,17 @@ import type {
 // ---------------------------------------------------------------------------
 
 type RawValidationState = {
+  activeShortRef: string | null;
   scrollY: number;
   axNodeIds: string[];
   axNodeBounds: Record<string, Bounds>;
   axNodeRoles: Record<string, string>;
   focusedElementId: string | null;
   hasDialog: boolean;
+  knownRefIds: string[];
+  liveRefIds: string[];
+  refToDomId: Record<string, string>;
 };
-
-// ---------------------------------------------------------------------------
-// Snapshot capture
-// ---------------------------------------------------------------------------
-
-async function ensureActionsInjected(
-  browser: BrowserWebViewHandle,
-): Promise<void> {
-  const check = await browser.evaluateJavaScript<string>(
-    'typeof window.__MUNINN_ACTIONS__',
-  );
-  if (check.ok && check.value === 'object') return;
-  await browser.evaluateJavaScript(ACTIONS_INJECTION_SCRIPT);
-}
 
 export async function captureValidationSnapshot(
   browser: BrowserWebViewHandle,
@@ -51,6 +40,7 @@ export async function captureValidationSnapshot(
   if (!result.ok) {
     // Return a minimal snapshot so callers don't have to null-check.
     return {
+      activeShortRef: null,
       url: browserState.currentUrl,
       isLoading: browserState.isLoading,
       scrollY: 0,
@@ -60,6 +50,9 @@ export async function captureValidationSnapshot(
       axNodeCount: 0,
       focusedElementId: null,
       hasDialog: false,
+      knownRefIds: new Set(),
+      liveRefIds: new Set(),
+      refToDomId: new Map(),
       timestamp: Date.now(),
     };
   }
@@ -73,8 +66,13 @@ export async function captureValidationSnapshot(
   for (const [id, role] of Object.entries(raw.axNodeRoles ?? {})) {
     axNodeRoles.set(id, role);
   }
+  const refToDomId = new Map<string, string>();
+  for (const [id, domId] of Object.entries(raw.refToDomId ?? {})) {
+    refToDomId.set(id, domId);
+  }
 
   return {
+    activeShortRef: raw.activeShortRef,
     url: browserState.currentUrl,
     isLoading: browserState.isLoading,
     scrollY: raw.scrollY,
@@ -84,6 +82,9 @@ export async function captureValidationSnapshot(
     axNodeCount: raw.axNodeIds.length,
     focusedElementId: raw.focusedElementId,
     hasDialog: raw.hasDialog ?? false,
+    knownRefIds: new Set(raw.knownRefIds ?? []),
+    liveRefIds: new Set(raw.liveRefIds ?? []),
+    refToDomId,
     timestamp: Date.now(),
   };
 }
@@ -96,7 +97,8 @@ export function isStaleRef(
   elementId: string,
   snapshot: ValidationSnapshot,
 ): boolean {
-  return !snapshot.axNodeIds.has(elementId);
+  const presence = resolveTargetPresence(elementId, snapshot);
+  return !presence.isPresent;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,33 @@ export function isStaleRef(
 // ---------------------------------------------------------------------------
 
 const AX_DELTA_THRESHOLD = 3;
+
+function resolveTargetPresence(
+  targetId: string,
+  snapshot: ValidationSnapshot,
+): { isPresent: boolean; wasKnown: boolean } {
+  const mappedDomId = snapshot.refToDomId.get(targetId) ?? null;
+
+  if (mappedDomId) {
+    return {
+      isPresent:
+        snapshot.liveRefIds.has(targetId) || snapshot.axNodeIds.has(mappedDomId),
+      wasKnown: true,
+    };
+  }
+
+  if (snapshot.axNodeIds.has(targetId)) {
+    return {
+      isPresent: true,
+      wasKnown: true,
+    };
+  }
+
+  return {
+    isPresent: false,
+    wasKnown: false,
+  };
+}
 
 function computeSignals(
   action: ToolName,
@@ -120,6 +149,10 @@ function computeSignals(
 
   const targetId =
     'id' in params && typeof params.id === 'string' ? params.id : null;
+  const targetPresence =
+    targetId !== null ? resolveTargetPresence(targetId, after) : null;
+  const targetKnowledge =
+    targetId !== null ? resolveTargetPresence(targetId, before) : null;
 
   return {
     urlChanged: before.url !== after.url,
@@ -131,7 +164,10 @@ function computeSignals(
       total: addedIds.length + removedIds.length,
     },
     targetStillPresent:
-      targetId !== null ? after.axNodeIds.has(targetId) : null,
+      targetPresence && (targetKnowledge?.wasKnown || targetPresence.wasKnown)
+        ? targetPresence.isPresent
+        : null,
+    targetWasKnown: targetKnowledge ? targetKnowledge.wasKnown : null,
     focusChanged: before.focusedElementId !== after.focusedElementId,
   };
 }
@@ -169,6 +205,9 @@ export function classifyOutcome(
   if (!toolResult.ok) {
     const targetId =
       'id' in params && typeof params.id === 'string' ? params.id : null;
+    if (toolResult.debug?.targetState === 'stale_ref') {
+      return { outcome: 'stale_ref', signals, reason: toolResult.reason };
+    }
     if (targetId && isStaleRef(targetId, before)) {
       return { outcome: 'stale_ref', signals, reason: toolResult.reason };
     }

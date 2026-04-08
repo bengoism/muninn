@@ -2,7 +2,11 @@ import type { ToolName } from '../../../types/agent';
 import type { BrowserWebViewHandle } from '../components/BrowserWebView';
 import { ACTIONS_INJECTION_SCRIPT } from './actions';
 import { TOOL_REGISTRY, validateToolParams } from './registry';
-import type { ToolResult } from './types';
+import type {
+  TargetReferenceState,
+  ToolExecutionDebug,
+  ToolResult,
+} from './types';
 
 function escapeJS(str: string): string {
   return str
@@ -12,7 +16,7 @@ function escapeJS(str: string): string {
     .replace(/\r/g, '\\r');
 }
 
-async function ensureActionsInjected(
+export async function ensureActionsInjected(
   browser: BrowserWebViewHandle
 ): Promise<void> {
   const check = await browser.evaluateJavaScript<string>(
@@ -22,10 +26,108 @@ async function ensureActionsInjected(
   await browser.evaluateJavaScript(ACTIONS_INJECTION_SCRIPT);
 }
 
+async function setDebugOptions(
+  browser: BrowserWebViewHandle,
+  captureRaw: boolean
+): Promise<void> {
+  await browser.evaluateJavaScript(
+    `window.__MUNINN_ACTIONS__.setDebugOptions({ captureRaw: ${
+      captureRaw ? 'true' : 'false'
+    } })`
+  );
+}
+
+async function classifyTargetReference(
+  browser: BrowserWebViewHandle,
+  elementId: string
+): Promise<TargetReferenceState | null> {
+  const result = await browser.evaluateJavaScript<TargetReferenceState>(
+    `(() => {
+      var refMap = window.__MUNINN_REF_MAP__ || {};
+      if (refMap["${escapeJS(elementId)}"]) {
+        return "known_ref";
+      }
+      if (document.querySelector('[data-ai-internal-id="${escapeJS(elementId)}"]')) {
+        return "legacy_dom_id";
+      }
+      return /^ai-/.test("${escapeJS(elementId)}") ? "stale_ref" : "unknown_ref";
+    })()`
+  );
+
+  return result.ok ? result.value : null;
+}
+
+function mergeDebug(
+  debug: ToolExecutionDebug | null | undefined,
+  jsCall: string | null,
+  action: ToolName,
+  params: Record<string, unknown>,
+  targetState: TargetReferenceState | null
+): ToolExecutionDebug | null {
+  if (!debug && !jsCall && targetState === null) {
+    return null;
+  }
+
+  return {
+    jsCall: jsCall ?? debug?.jsCall ?? null,
+    matchedElement: debug?.matchedElement ?? null,
+    requestedAction: debug?.requestedAction ?? action,
+    requestedParams: debug?.requestedParams ?? params,
+    resolver: debug?.resolver ?? null,
+    targetState: targetState ?? debug?.targetState ?? null,
+  };
+}
+
+export async function probeLocator(
+  browser: BrowserWebViewHandle,
+  elementId: string,
+  captureRaw = false,
+) {
+  await ensureActionsInjected(browser);
+  await setDebugOptions(browser, captureRaw);
+
+  const result = await browser.evaluateJavaScript<{
+    debug?: ToolExecutionDebug | null;
+    ok: boolean;
+    reason: string | null;
+  }>(`window.__MUNINN_ACTIONS__.resolveOnly("${escapeJS(elementId)}")`);
+
+  if (!result.ok) {
+    return {
+      debug: null,
+      ok: false,
+      reason: result.message ?? 'Locator probe failed.',
+      targetId: elementId,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  const actionResult = result.value;
+  return {
+    debug: mergeDebug(
+      actionResult?.debug ?? null,
+      null,
+      'focus',
+      { id: elementId },
+      actionResult?.debug?.targetState ?? null,
+    ),
+    ok: actionResult?.ok ?? false,
+    reason:
+      actionResult?.ok ?? false
+        ? null
+        : formatError('focus', { id: elementId }, actionResult?.reason ?? null),
+    targetId: elementId,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 export async function executeTool(
   action: ToolName,
   params: Record<string, unknown>,
-  browser: BrowserWebViewHandle
+  browser: BrowserWebViewHandle,
+  options?: {
+    captureRaw?: boolean;
+  },
 ): Promise<ToolResult> {
   const startedAt = Date.now();
 
@@ -64,10 +166,14 @@ export async function executeTool(
 
   // Browser actions need injected JS helpers.
   await ensureActionsInjected(browser);
+  await setDebugOptions(browser, options?.captureRaw === true);
+
+  let targetState: TargetReferenceState | null = null;
 
   // Refresh element IDs before acting — re-assigns data-ai-internal-id
   // to elements that may have been re-rendered by React/SPA frameworks.
   if (typeof params.id === 'string') {
+    targetState = await classifyTargetReference(browser, params.id);
     await browser.evaluateJavaScript(`
       (function() {
         var refMap = window.__MUNINN_REF_MAP__ || {};
@@ -134,12 +240,17 @@ export async function executeTool(
       };
   }
 
-  const result = await browser.evaluateJavaScript<{ ok: boolean; reason: string | null }>(jsCall);
+  const result = await browser.evaluateJavaScript<{
+    debug?: ToolExecutionDebug | null;
+    ok: boolean;
+    reason: string | null;
+  }>(jsCall);
 
   if (!result.ok) {
     return {
       ok: false,
       action,
+      debug: mergeDebug(null, jsCall, action, params, targetState),
       reason: result.message ?? 'JavaScript evaluation failed',
       durationMs: Date.now() - startedAt,
     };
@@ -147,9 +258,18 @@ export async function executeTool(
 
   const actionResult = result.value;
   const rawReason = actionResult?.reason ?? null;
+  const debug = mergeDebug(
+    actionResult?.debug ?? null,
+    jsCall,
+    action,
+    params,
+    targetState,
+  );
+
   return {
     ok: actionResult?.ok ?? false,
     action,
+    debug,
     reason: actionResult?.ok ? rawReason : formatError(action, params, rawReason),
     durationMs: Date.now() - startedAt,
   };
@@ -161,6 +281,9 @@ function formatError(
   rawError: string | null,
 ): string {
   const msg = rawError ?? 'Unknown error';
+  if (msg.includes('Unknown ref')) {
+    return `${msg}. The model likely chose an ID that was not present in the latest observation.`;
+  }
   if (msg.includes('Element not found')) {
     return `${msg}. The element may have been removed or the page changed. Try re-observing.`;
   }

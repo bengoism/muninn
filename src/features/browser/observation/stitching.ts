@@ -1,6 +1,7 @@
 import type {
   AxNode,
   ObservationFrameSnapshot,
+  ObservationRefEntry,
   Point,
 } from '../../../types/agent';
 import type {
@@ -20,6 +21,23 @@ type StitchObservationInput = {
 type StitchObservationOutput = {
   axSnapshot: AxNode[];
   axTreeText: string;
+  debug: {
+    combinedRefMap: Record<string, ObservationRefEntry>;
+    expectedFrameIds: string[];
+    frameArtifacts: {
+      error: string | null;
+      frameId: string;
+      frameTitle: string | null;
+      frameUrl: string | null;
+      isTopFrame: boolean;
+      nodeCount: number;
+      observedAt: string | null;
+      refIds: string[];
+      refMap: Record<string, ObservationRefEntry>;
+      treeText: string;
+    }[];
+    timedOut: boolean;
+  };
   frameSnapshots: ObservationFrameSnapshot[];
   warnings: string[];
 };
@@ -146,10 +164,42 @@ export function stitchObservationArtifacts(
     .map((response) => response.payload.treeText || '')
     .filter(Boolean)
     .join('\n');
+  const combinedRefMap = input.responses.reduce<Record<string, ObservationRefEntry>>(
+    (accumulator, response) => ({
+      ...accumulator,
+      ...response.payload.refMap,
+    }),
+    {},
+  );
+  const debugFrameArtifacts = Array.from(frameIds)
+    .sort()
+    .map((frameId) => {
+      const response = responsesByFrameId.get(frameId) ?? null;
+      const error = errorsByFrameId.get(frameId) ?? null;
+
+      return {
+        error: error?.payload.message ?? null,
+        frameId,
+        frameTitle: response?.frame.title ?? error?.frame.title ?? null,
+        frameUrl: response?.frame.url ?? error?.frame.url ?? null,
+        isTopFrame: response?.frame.isTopFrame ?? error?.frame.isTopFrame ?? false,
+        nodeCount: response?.payload.nodes.length ?? 0,
+        observedAt: response?.payload.observedAt ?? error?.timestamp ?? null,
+        refIds: response ? Object.keys(response.payload.refMap) : [],
+        refMap: response?.payload.refMap ?? {},
+        treeText: response?.payload.treeText ?? '',
+      };
+    });
 
   return {
     axSnapshot,
     axTreeText,
+    debug: {
+      combinedRefMap,
+      expectedFrameIds: [...input.expectedFrameIds].sort(),
+      frameArtifacts: debugFrameArtifacts,
+      timedOut: input.timedOut,
+    },
     frameSnapshots,
     warnings,
   };
