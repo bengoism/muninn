@@ -15,6 +15,7 @@ import {
 import { useAgentSessionStore } from '../../../state/agent-session-store';
 import { useChatStore, type ChatMessage } from '../../../state/chat-store';
 import { useDebugStore } from '../../../state/debug-store';
+import type { PlanItem, SessionPlan } from '../../../types/agent';
 
 type Tab = 'chat' | 'debug';
 
@@ -66,6 +67,139 @@ function humanizeAction(action: string, params: Record<string, unknown>): string
   }
 }
 
+function getStepTone(
+  outcome: ChatMessage extends infer Message
+    ? Message extends { type: 'agent_step'; outcome: infer Outcome }
+      ? Outcome
+      : never
+    : never,
+) {
+  switch (outcome) {
+    case 'success':
+      return { dot: styles.stepDotSuccess, label: styles.stepLabelNeutral, detail: styles.stepDetailNeutral };
+    case 'partial_success':
+      return { dot: styles.stepDotProgress, label: styles.stepLabelNeutral, detail: styles.stepDetailPositive };
+    case 'no_op':
+    case 'blocked':
+    case 'stale_ref':
+      return { dot: styles.stepDotWarn, label: styles.stepLabelNeutral, detail: styles.stepDetailWarn };
+    case 'failed':
+    default:
+      return { dot: styles.stepDotError, label: styles.stepLabelNeutral, detail: styles.stepDetailError };
+  }
+}
+
+function formatPlanItemStatus(status: PlanItem['status']) {
+  switch (status) {
+    case 'in_progress':
+      return 'In progress';
+    case 'completed':
+      return 'Done';
+    case 'blocked':
+      return 'Blocked';
+    case 'dropped':
+      return 'Dropped';
+    case 'pending':
+    default:
+      return 'Pending';
+  }
+}
+
+function formatPlanPhase(plan: SessionPlan['phase']) {
+  switch (plan) {
+    case 'initial':
+      return 'Initial';
+    case 'search':
+      return 'Search';
+    case 'results':
+      return 'Results';
+    case 'detail':
+      return 'Detail';
+    case 'form':
+      return 'Form';
+    case 'checkout':
+      return 'Checkout';
+    case 'blocked':
+      return 'Blocked';
+    case 'done':
+      return 'Done';
+    default:
+      return plan;
+  }
+}
+
+function PlanCard({ plan }: { plan: SessionPlan | null }) {
+  if (!plan) {
+    return null;
+  }
+
+  const activeItem =
+    plan.items.find((item) => item.id === plan.activeItemId) ?? null;
+  const visibleItems = plan.items.filter((item) => item.status !== 'dropped').slice(0, 4);
+
+  return (
+    <View style={styles.planCard}>
+      <View style={styles.planHeader}>
+        <Text style={styles.planEyebrow}>Plan</Text>
+        <View style={styles.planPhaseBadge}>
+          <Text style={styles.planPhaseText}>{formatPlanPhase(plan.phase)}</Text>
+        </View>
+      </View>
+      {activeItem ? (
+        <Text style={styles.planActiveTodo}>{activeItem.text}</Text>
+      ) : (
+        <Text style={styles.planActiveTodoMuted}>No active todo</Text>
+      )}
+      {plan.lastConfirmedProgress ? (
+        <Text style={styles.planProgress}>{plan.lastConfirmedProgress}</Text>
+      ) : null}
+      <View style={styles.planTodoList}>
+        {visibleItems.map((item) => {
+          const isActive = item.id === plan.activeItemId;
+          return (
+            <View
+              key={item.id}
+              style={[styles.planTodoRow, isActive && styles.planTodoRowActive]}
+            >
+              <View
+                style={[
+                  styles.planTodoStatusDot,
+                  item.status === 'completed'
+                    ? styles.planTodoStatusDone
+                    : item.status === 'in_progress'
+                      ? styles.planTodoStatusActive
+                      : item.status === 'blocked'
+                        ? styles.planTodoStatusBlocked
+                        : styles.planTodoStatusPending,
+                ]}
+              />
+              <View style={styles.planTodoCopy}>
+                <Text
+                  style={[
+                    styles.planTodoText,
+                    item.status === 'completed' && styles.planTodoTextDone,
+                  ]}
+                >
+                  {item.text}
+                </Text>
+                <Text style={styles.planTodoMeta}>
+                  {formatPlanItemStatus(item.status)}
+                  {isActive ? ' · Active' : ''}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      {plan.avoidRefs.length > 0 ? (
+        <Text style={styles.planAvoidRefs}>
+          Avoiding {plan.avoidRefs.map((entry) => entry.ref).join(', ')} for now
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function ChatMessageRow({ message }: { message: ChatMessage }) {
   if (message.type === 'user') {
     return (
@@ -93,16 +227,16 @@ function ChatMessageRow({ message }: { message: ChatMessage }) {
   }
 
   if (message.type === 'agent_step') {
-    const isSuccess = message.outcome === 'success';
     const humanized = humanizeAction(message.action, message.params);
+    const tone = getStepTone(message.outcome);
     const detail = message.urlChanged ? 'Navigated to new page' :
-      (!isSuccess && message.reason) ? message.reason.split('.')[0] : null;
+      (message.reason ? message.reason.split('.')[0] : null);
     return (
       <View style={styles.stepRow}>
-        <View style={[styles.stepDot, isSuccess ? styles.stepDotOk : styles.stepDotFail]} />
+        <View style={[styles.stepDot, tone.dot]} />
         <View style={styles.stepContent}>
-          <Text style={[styles.stepLabel, !isSuccess && styles.stepLabelFail]}>{humanized}</Text>
-          {detail && <Text style={styles.stepDetail}>{detail}</Text>}
+          <Text style={[styles.stepLabel, tone.label]}>{humanized}</Text>
+          {detail && <Text style={[styles.stepDetail, tone.detail]}>{detail}</Text>}
         </View>
       </View>
     );
@@ -136,6 +270,7 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
   const goal = useAgentSessionStore((s) => s.goal);
   const setGoal = useAgentSessionStore((s) => s.setGoal);
   const loopState = useAgentSessionStore((s) => s.loopState);
+  const plan = useAgentSessionStore((s) => s.plan);
   const messages = useChatStore((s) => s.messages);
   const actionTraces = useDebugStore((s) => s.actionTraces);
   const lastLocatorProbe = useDebugStore((s) => s.lastLocatorProbe);
@@ -265,10 +400,14 @@ export function BottomPanel({ onStart, onCancel, isRunning, modelReady, modelNam
             renderItem={({ item }) => <ChatMessageRow message={item} />}
             style={styles.list}
             contentContainerStyle={styles.listContent}
+            ListHeaderComponent={<PlanCard plan={plan} />}
             ListFooterComponent={isRunning ? <ThinkingFooter loopState={loopState} /> : null}
           />
         ) : (
-          <View style={styles.empty}><Text style={styles.emptyText}>Agent activity will appear here</Text></View>
+          <View style={styles.empty}>
+            <PlanCard plan={plan} />
+            <Text style={styles.emptyText}>Agent activity will appear here</Text>
+          </View>
         )
       ) : (
         <View style={styles.debugContent}>
@@ -351,17 +490,60 @@ const styles = StyleSheet.create({
   modelLabel: { color: '#555', fontSize: 11, fontWeight: '500', alignSelf: 'center', paddingRight: 4 },
   list: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingVertical: 12, gap: 10 },
+  planCard: {
+    backgroundColor: '#262626',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#3a3a3a',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+    marginBottom: 10,
+  },
+  planHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  planEyebrow: { color: '#7d7d7d', fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  planPhaseBadge: {
+    backgroundColor: 'rgba(145, 196, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(145, 196, 255, 0.22)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  planPhaseText: { color: '#b8d4ff', fontSize: 11, fontWeight: '600' },
+  planActiveTodo: { color: '#f2f2f2', fontSize: 15, lineHeight: 20, fontWeight: '600' },
+  planActiveTodoMuted: { color: '#8a8a8a', fontSize: 14, lineHeight: 20 },
+  planProgress: { color: '#9dd6b7', fontSize: 12, lineHeight: 17 },
+  planTodoList: { gap: 8 },
+  planTodoRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  planTodoRowActive: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 7, marginHorizontal: -8 },
+  planTodoStatusDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
+  planTodoStatusDone: { backgroundColor: '#34c759' },
+  planTodoStatusActive: { backgroundColor: '#63a5ff' },
+  planTodoStatusBlocked: { backgroundColor: '#f3b35a' },
+  planTodoStatusPending: { backgroundColor: '#595959' },
+  planTodoCopy: { flex: 1, gap: 2 },
+  planTodoText: { color: '#d8d8d8', fontSize: 13, lineHeight: 18 },
+  planTodoTextDone: { color: '#8dbe9c' },
+  planTodoMeta: { color: '#7c7c7c', fontSize: 11, lineHeight: 15 },
+  planAvoidRefs: { color: '#b99a67', fontSize: 11, lineHeight: 15 },
   userRow: { alignItems: 'flex-end' },
   userBubble: { backgroundColor: '#2a2a2a', borderRadius: 12, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 10, maxWidth: '85%' },
   userText: { color: '#ededed', fontSize: 14, lineHeight: 20 },
   stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   stepDot: { width: 6, height: 6, borderRadius: 3, marginTop: 6 },
-  stepDotOk: { backgroundColor: '#555' },
-  stepDotFail: { backgroundColor: '#ff4747' },
+  stepDotSuccess: { backgroundColor: '#4f8cff' },
+  stepDotProgress: { backgroundColor: '#6ed6a0' },
+  stepDotWarn: { backgroundColor: '#f3b35a' },
+  stepDotError: { backgroundColor: '#ff6b6b' },
   stepContent: { flex: 1, gap: 2 },
   stepLabel: { color: '#aaa', fontSize: 13, lineHeight: 18 },
-  stepLabelFail: { color: '#ff4747' },
+  stepLabelNeutral: { color: '#d5d5d5' },
   stepDetail: { color: '#555', fontSize: 12, lineHeight: 16 },
+  stepDetailNeutral: { color: '#6f6f6f' },
+  stepDetailPositive: { color: '#78c99b' },
+  stepDetailWarn: { color: '#d4a65e' },
+  stepDetailError: { color: '#e28787' },
   infoBoxRow: { paddingVertical: 2 },
   infoBox: { borderRadius: 8, borderWidth: 1, borderColor: '#333', backgroundColor: 'rgba(255,255,255,0.03)', paddingHorizontal: 14, paddingVertical: 10 },
   infoBoxSuccess: { borderColor: 'rgba(0,212,126,0.3)', backgroundColor: 'rgba(0,212,126,0.06)' },
@@ -375,6 +557,6 @@ const styles = StyleSheet.create({
   debugContent: { flex: 1, paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
   debugTitle: { color: '#888', fontSize: 11, fontWeight: '600', letterSpacing: 0.8 },
   debugText: { color: '#666', fontSize: 12, lineHeight: 17, fontFamily: 'Menlo' },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 24 },
+  empty: { flex: 1, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 24, gap: 16 },
   emptyText: { color: '#555', fontSize: 13 },
 });
