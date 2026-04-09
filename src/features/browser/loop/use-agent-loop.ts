@@ -34,7 +34,10 @@ import {
   repairInvalidTargetAction,
 } from './invalid-target-repair';
 import {
+  buildReducedInferenceRequest,
+  canReduceInferenceRequest,
   downgradePlanningContextRequest,
+  shouldRetryInferenceWithReducedContext,
   shouldRetryInferenceWithoutPlanningContext,
 } from './inference-fallback';
 import {
@@ -47,6 +50,13 @@ import {
   finalizePlanningContextRequest,
   toInferencePlanningContext,
 } from './planning-context';
+import { repairGenericClickTarget } from './semantic-target-repair';
+import {
+  analyzeTargetEntry,
+  buildInferenceTargetSummary,
+  getTargetSummaryEntry,
+  isEditableTargetEntry,
+} from './target-analysis';
 import {
   addAvoidRef,
   applyPlanUpdateProposals,
@@ -275,6 +285,11 @@ export function useAgentLoop(
             'observation',
             stepNum,
           );
+          const targetSummary = buildInferenceTargetSummary({
+            goal,
+            observation,
+            plan: store.getState().plan,
+          });
           logStep(stepNum, 'observe', {
             url: useBrowserStore.getState().currentUrl,
             axNodes: observation.axSnapshot.length,
@@ -291,6 +306,14 @@ export function useAgentLoop(
             quiescence: observation.quiescence.satisfied,
             warnings: observation.warnings.length,
           });
+          if (targetSummary) {
+            logStep(stepNum, 'targets', {
+              editable: targetSummary.editable.map((entry) => entry.id),
+              exploratory: targetSummary.exploratory.map((entry) => entry.id),
+              lowerPriority: targetSummary.lowerPriority.map((entry) => entry.id),
+              preferred: targetSummary.preferred.map((entry) => entry.id),
+            });
+          }
           if (observation.axTreeText) {
             console.log(`[muninn:step-${stepNum}:tree]\n${observation.axTreeText}`);
           }
@@ -302,16 +325,18 @@ export function useAgentLoop(
           const inferencePlanningContext = toInferencePlanningContext(
             finalizedPlanningContextRequest,
           );
-          let inference = await runInference({
+          let inferenceRequest = {
             goal,
             planningContext: inferencePlanningContext,
+            targetSummary,
             screenshotUri: observation.screenshot.uri,
             axSnapshot: observation.axSnapshot,
             axTreeText: observation.axTreeText,
             actionHistory: store.getState().actionHistory,
             sessionPlan: store.getState().plan,
             runtimeMode,
-          });
+          };
+          let inference = await runInference(inferenceRequest);
           if (
             shouldRetryInferenceWithoutPlanningContext(
               inference,
@@ -324,16 +349,30 @@ export function useAgentLoop(
               retry: 'without_planning_context',
             });
             planningContextDisabledReason = `${inference.code}: ${inference.message}`;
-            inference = await runInference({
-              goal,
+            inferenceRequest = {
+              ...inferenceRequest,
               planningContext: null,
-              screenshotUri: observation.screenshot.uri,
-              axSnapshot: observation.axSnapshot,
-              axTreeText: observation.axTreeText,
-              actionHistory: store.getState().actionHistory,
-              sessionPlan: store.getState().plan,
-              runtimeMode,
+            };
+            inference = await runInference(inferenceRequest);
+          }
+          if (
+            shouldRetryInferenceWithReducedContext(inference) &&
+            canReduceInferenceRequest(inferenceRequest)
+          ) {
+            const reducedRequest = buildReducedInferenceRequest(inferenceRequest);
+            logStep(stepNum, 'inference_fallback', {
+              code: inference.code,
+              message: inference.message,
+              retry: 'reduced_context',
+              actionHistoryFrom: inferenceRequest.actionHistory.length,
+              actionHistoryTo: reducedRequest.actionHistory.length,
+              planningContextDropped: inferenceRequest.planningContext !== null,
+              targetSummaryDropped: inferenceRequest.targetSummary !== null,
+              treeTextLenFrom: inferenceRequest.axTreeText.length,
+              treeTextLenTo: reducedRequest.axTreeText.length,
             });
+            inferenceRequest = reducedRequest;
+            inference = await runInference(inferenceRequest);
           }
           if (cancelledRef.current) break;
           setLastNativeResponse(inference);
@@ -512,6 +551,114 @@ export function useAgentLoop(
                 targetState: executableTargetState,
               },
             });
+          }
+
+          const semanticClickRepair =
+            executableTargetId &&
+            executableAction === 'click' &&
+            executableTargetState === 'known_ref'
+              ? repairGenericClickTarget({
+                  action: executableAction,
+                  goal,
+                  observation,
+                  params: executableParameters,
+                  plan: store.getState().plan,
+                  targetState: executableTargetState,
+                })
+              : null;
+
+          if (semanticClickRepair) {
+            executableAction = semanticClickRepair.action;
+            executableParameters = semanticClickRepair.params;
+            executableTargetId = semanticClickRepair.candidateRef;
+            executableTargetState = classifyTargetBeforeAction(
+              executableTargetId,
+              preSnapshot,
+            );
+            logStep(stepNum, 'repair_target', {
+              from: {
+                action,
+                params: parameters,
+                targetId: typeof parameters.id === 'string' ? parameters.id : null,
+              },
+              reason: semanticClickRepair.reason,
+              score: semanticClickRepair.score,
+              to: {
+                action: executableAction,
+                candidateRef: semanticClickRepair.candidateRef,
+                params: executableParameters,
+                targetState: executableTargetState,
+              },
+            });
+          }
+
+          const resolvedTargetSummaryEntry =
+            executableTargetId !== null
+              ? getTargetSummaryEntry(targetSummary, executableTargetId) ??
+                analyzeTargetEntry(executableTargetId, {
+                  goal,
+                  observation,
+                  plan: store.getState().plan,
+                })
+              : null;
+          const requiresEditableTarget =
+            executableAction === 'type' ||
+            executableAction === 'fill' ||
+            executableAction === 'select';
+
+          if (
+            executableTargetId &&
+            requiresEditableTarget &&
+            resolvedTargetSummaryEntry &&
+            !isEditableTargetEntry(resolvedTargetSummaryEntry)
+          ) {
+            if (resolvedTargetSummaryEntry.capabilities.includes('click')) {
+              logStep(stepNum, 'repair_target', {
+                from: {
+                  action: executableAction,
+                  params: executableParameters,
+                  targetId: executableTargetId,
+                },
+                reason:
+                  'Non-editable targets must be activated with click before text entry.',
+                to: {
+                  action: 'click',
+                  params: { id: executableTargetId },
+                  targetId: executableTargetId,
+                },
+              });
+              executableAction = 'click';
+              executableParameters = { id: executableTargetId };
+            } else {
+              const reason = `Target ${executableTargetId} is not editable.`;
+              logStep(stepNum, 'guard', {
+                id: executableTargetId,
+                reason: 'non_editable_text_target',
+                detail: resolvedTargetSummaryEntry.priorityReason,
+              });
+              chat.addMessage({
+                type: 'agent_step',
+                step: stepNum,
+                action: executableAction,
+                params: executableParameters,
+                outcome: 'blocked',
+                reason,
+                urlChanged: false,
+                timestamp: new Date().toISOString(),
+              });
+              addActionRecord(
+                toActionRecord(
+                  executableAction,
+                  executableParameters,
+                  'blocked',
+                  reason,
+                  preSnapshot.url,
+                  preSnapshot.url,
+                ),
+              );
+              incrementStep();
+              continue;
+            }
           }
 
           if (

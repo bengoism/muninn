@@ -89,6 +89,7 @@ export type TargetReferenceState =
 
 export type LocatorCandidateSummary = {
   domId: string | null;
+  href?: string | null;
   htmlId: string | null;
   label: string | null;
   role: string | null;

@@ -51,6 +51,13 @@ export type ObservationRefEntry = {
   role: string;
   label: string;
   selector: string;
+  snapshotId?: string;
+  targetType?: 'semantic' | 'generic';
+  tagName?: string;
+  text?: string;
+  placeholder?: string | null;
+  href?: string | null;
+  hasSemanticDescendants?: boolean;
 };
 
 export type AgentActionStatus =
@@ -105,6 +112,38 @@ export type InferencePlanningContext = {
   fullPageScreenshotUri: string;
   reasons: PlanningContextReason[];
   summary: string;
+};
+
+export type TargetCapability = 'click' | 'type' | 'select';
+
+export type TargetAffordance =
+  | 'text_entry'
+  | 'navigation_leaf'
+  | 'direct_action'
+  | 'disclosure'
+  | 'adjust_value'
+  | 'option_like'
+  | 'exploratory_opener'
+  | 'container';
+
+export type TargetPriority = 'preferred' | 'neutral' | 'lower_priority';
+
+export type TargetSummaryEntry = {
+  id: string;
+  label: string;
+  role: string;
+  targetType: 'semantic' | 'generic';
+  capabilities: TargetCapability[];
+  affordances: TargetAffordance[];
+  priority: TargetPriority;
+  priorityReason: string;
+};
+
+export type InferenceTargetSummary = {
+  preferred: TargetSummaryEntry[];
+  editable: TargetSummaryEntry[];
+  exploratory: TargetSummaryEntry[];
+  lowerPriority: TargetSummaryEntry[];
 };
 
 export type PlanningContextDebugRequest = {
@@ -165,6 +204,7 @@ export type InferenceRequest = {
   goal: string;
   screenshotUri: string;
   planningContext: InferencePlanningContext | null;
+  targetSummary: InferenceTargetSummary | null;
   axSnapshot: AxNode[];
   axTreeText: string;
   actionHistory: AgentActionRecord[];

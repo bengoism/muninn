@@ -20,6 +20,8 @@ final class AgentRuntimePromptBuilder {
     - finish(status: "success"|"failure", message: string) — task complete
 
     IMPORTANT: Elements with [ref=...] are interactive. You MUST use the exact short ref value (e.g. "e1") as the "id" parameter. Never use the element's label, description, or a DOM id like "ai-main-abc-123" as the id.
+    Prefer semantic refs such as links, buttons, searchboxes, textboxes, and comboboxes. Treat generic clickable refs as exploratory fallbacks, not first-choice targets, especially on results pages.
+    Use the Target guidance section to understand which refs are editable, exploratory, preferred, or lower priority for the current step.
     If typing into a field has no effect, try clicking or focusing the field, then observe again. If that opens a modal, sheet, fullscreen editor, or expanded picker, retarget the actual active input before typing.
     If the active todo is still to open or inspect a result, do not call finish just because a results page is visible.
     Read the current todo list before each step. After choosing the next action, you may optionally propose bounded plan updates in a top-level "plan_updates" array. The runtime validates these updates before applying them.
@@ -51,6 +53,12 @@ final class AgentRuntimePromptBuilder {
     if let planSummary = buildPlanSummary(request.sessionPlan) {
       parts.append("Current plan:")
       parts.append(planSummary)
+      parts.append("")
+    }
+
+    if let targetSummary = buildTargetSummary(request.targetSummary) {
+      parts.append("Target guidance:")
+      parts.append(targetSummary)
       parts.append("")
     }
 
@@ -216,6 +224,75 @@ final class AgentRuntimePromptBuilder {
     }
 
     return lines.isEmpty ? nil : lines.joined(separator: "\n")
+  }
+
+  private func buildTargetSummary(_ summary: [String: Any]?) -> String? {
+    guard let summary else {
+      return nil
+    }
+
+    var lines: [String] = []
+    var renderedIds = Set<String>()
+    appendTargetSection(title: "Preferred now", key: "preferred", from: summary, renderedIds: &renderedIds, to: &lines)
+    appendTargetSection(title: "Editable now", key: "editable", from: summary, renderedIds: &renderedIds, to: &lines)
+    appendTargetSection(title: "Exploratory openers", key: "exploratory", from: summary, renderedIds: &renderedIds, to: &lines)
+    appendTargetSection(title: "Lower priority now", key: "lowerPriority", from: summary, renderedIds: &renderedIds, to: &lines)
+
+    return lines.isEmpty ? nil : lines.joined(separator: "\n")
+  }
+
+  private func appendTargetSection(
+    title: String,
+    key: String,
+    from summary: [String: Any],
+    renderedIds: inout Set<String>,
+    to lines: inout [String]
+  ) {
+    guard
+      let items = summary[key] as? [[String: Any]],
+      !items.isEmpty
+    else {
+      return
+    }
+
+    var renderedLines: [String] = []
+    for item in items {
+      guard let id = item["id"] as? String, !id.isEmpty else {
+        continue
+      }
+      if renderedIds.contains(id) {
+        continue
+      }
+
+      let targetType = item["targetType"] as? String ?? "semantic"
+      let role = item["role"] as? String ?? "generic"
+      let label = (item["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let capabilities = item["capabilities"] as? [String] ?? []
+      let affordances = item["affordances"] as? [String] ?? []
+
+      var line = "- \(id) | \(targetType) | \(role)"
+      if !capabilities.isEmpty {
+        line += " | \(capabilities.joined(separator: ","))"
+      }
+      if !affordances.isEmpty {
+        line += " | \(affordances.prefix(2).joined(separator: ","))"
+      }
+      if !label.isEmpty {
+        line += " | \"\(label)\""
+      }
+      renderedLines.append(line)
+      renderedIds.insert(id)
+      if renderedLines.count >= 3 {
+        break
+      }
+    }
+
+    guard !renderedLines.isEmpty else {
+      return
+    }
+
+    lines.append("\(title):")
+    lines.append(contentsOf: renderedLines)
   }
 
   private func buildActionHistory(_ history: [[String: Any]]) -> String {

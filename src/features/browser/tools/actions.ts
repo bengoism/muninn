@@ -48,6 +48,76 @@ export const ACTIONS_INJECTION_SCRIPT = `
     return role ? '[role="' + role + '"]' : '*';
   }
 
+  function getElementRole(element) {
+    if (!element) {
+      return null;
+    }
+
+    var explicitRole = normalizeString(element.getAttribute('role'));
+    if (explicitRole) {
+      return explicitRole;
+    }
+
+    var tagName = element.tagName ? element.tagName.toLowerCase() : '';
+    if (tagName === 'a' && element.getAttribute('href')) {
+      return 'link';
+    }
+    if (tagName === 'button' || tagName === 'summary') {
+      return 'button';
+    }
+    if (tagName === 'textarea') {
+      return 'textbox';
+    }
+    if (tagName === 'select') {
+      return 'combobox';
+    }
+    if (tagName === 'input') {
+      var type = normalizeString(element.getAttribute('type')) || 'text';
+      if (type === 'checkbox' || type === 'radio') {
+        return type;
+      }
+      if (
+        type === 'submit' ||
+        type === 'button' ||
+        type === 'reset' ||
+        type === 'image'
+      ) {
+        return 'button';
+      }
+      if (type === 'search') {
+        return 'searchbox';
+      }
+      return 'textbox';
+    }
+    if (
+      element.getAttribute('contenteditable') === 'true' ||
+      element.getAttribute('contenteditable') === ''
+    ) {
+      return 'textbox';
+    }
+    return 'generic';
+  }
+
+  function getElementPlaceholder(element) {
+    if (!element) {
+      return null;
+    }
+
+    return normalizeString(element.getAttribute('placeholder'));
+  }
+
+  function getElementHref(element) {
+    if (!element) {
+      return null;
+    }
+
+    if (element instanceof HTMLAnchorElement && typeof element.href === 'string') {
+      return normalizeString(element.href);
+    }
+
+    return normalizeString(element.getAttribute('href'));
+  }
+
   function getElementLabel(element) {
     if (!element) {
       return null;
@@ -90,9 +160,10 @@ export const ACTIONS_INJECTION_SCRIPT = `
 
     return {
       domId: normalizeString(element.getAttribute(NODE_ID_ATTR)),
+      href: captureRaw ? getElementHref(element) : null,
       htmlId: normalizeString(element.getAttribute('id')),
       label: captureRaw ? getElementLabel(element) : null,
-      role: normalizeString(element.getAttribute('role')),
+      role: getElementRole(element),
       selector: selectorHint || null,
       tagName: element.tagName ? element.tagName.toLowerCase() : null,
       text: captureRaw ? getElementText(element) : null,
@@ -136,6 +207,89 @@ export const ACTIONS_INJECTION_SCRIPT = `
     );
   }
 
+  function entryTargetType(entry) {
+    if (!entry) {
+      return 'generic';
+    }
+
+    if (entry.targetType) {
+      return entry.targetType;
+    }
+
+    return entry.role === 'generic' ? 'generic' : 'semantic';
+  }
+
+  function entryMatchesElement(entry, element) {
+    if (!entry || !element) {
+      return true;
+    }
+
+    var targetType = entryTargetType(entry);
+    var score = 0;
+    var currentRole = getElementRole(element);
+    var currentTag = element.tagName ? element.tagName.toLowerCase() : null;
+    var currentLabel = getElementLabel(element);
+    var currentText = getElementText(element);
+    var currentPlaceholder = getElementPlaceholder(element);
+    var currentHref = getElementHref(element);
+
+    if (entry.role && currentRole === entry.role) {
+      score += 3;
+    } else if (entry.role && entry.role !== 'generic') {
+      score -= 4;
+    }
+
+    if (entry.tagName && currentTag === entry.tagName) {
+      score += 2;
+    } else if (entry.tagName && currentTag) {
+      score -= 2;
+    }
+
+    if (entry.label) {
+      if (matchesLabel(entry.label, currentLabel, 30)) {
+        score += 3;
+      } else if (targetType === 'semantic') {
+        score -= 2;
+      }
+    }
+
+    if (entry.text) {
+      if (
+        matchesLabel(entry.text, currentText, 20) ||
+        matchesLabel(currentText, entry.text, 20)
+      ) {
+        score += 2;
+      } else if (targetType === 'semantic') {
+        score -= 1;
+      }
+    }
+
+    if (entry.placeholder) {
+      if (currentPlaceholder === entry.placeholder) {
+        score += 1;
+      } else if (targetType === 'semantic') {
+        score -= 1;
+      }
+    }
+
+    if (entry.href) {
+      if (
+        currentHref &&
+        (currentHref.indexOf(entry.href) !== -1 || entry.href.indexOf(currentHref) !== -1)
+      ) {
+        score += 3;
+      } else {
+        score -= 3;
+      }
+    }
+
+    if (targetType === 'generic') {
+      return score >= -1;
+    }
+
+    return score >= 1;
+  }
+
   function resolveElement(elementId) {
     var refMap = window.__MUNINN_REF_MAP__ || {};
     var entry = refMap[elementId] || null;
@@ -165,9 +319,17 @@ export const ACTIONS_INJECTION_SCRIPT = `
       var attrMatch = document.querySelector(
         '[' + NODE_ID_ATTR + '="' + entry.domId + '"]'
       );
-      if (attrMatch) {
+      if (attrMatch && entryMatchesElement(entry, attrMatch)) {
         matchedElement = attrMatch;
         pushAttempt('ref.dom_id', [attrMatch], attrMatch, null, entry.selector || null);
+      } else if (attrMatch) {
+        pushAttempt(
+          'ref.dom_id',
+          [attrMatch],
+          null,
+          'Live node no longer matches the observed role, label, or link target.',
+          entry.selector || null
+        );
       } else {
         pushAttempt('ref.dom_id', [], null, 'No live node with the stored DOM id.', null);
       }
@@ -183,9 +345,11 @@ export const ACTIONS_INJECTION_SCRIPT = `
               (entry.label && matchesLabel(entry.label, selectorLabel, 30)) ||
               (!entry.label && selectorCandidates.length === 1)
             ) {
-              selectorWinner = selectorCandidate;
-              selectorWinner.setAttribute(NODE_ID_ATTR, entry.domId);
-              break;
+              if (entryMatchesElement(entry, selectorCandidate)) {
+                selectorWinner = selectorCandidate;
+                selectorWinner.setAttribute(NODE_ID_ATTR, entry.domId);
+                break;
+              }
             }
           }
           if (selectorWinner) {
@@ -233,11 +397,13 @@ export const ACTIONS_INJECTION_SCRIPT = `
               (entry.label && matchesLabel(entry.label, roleLabel, 20)) ||
               (!entry.label && roleCandidates.length === 1)
             ) {
-              roleWinner = roleCandidate;
-              if (!roleWinner.getAttribute(NODE_ID_ATTR)) {
-                roleWinner.setAttribute(NODE_ID_ATTR, entry.domId);
+              if (entryMatchesElement(entry, roleCandidate)) {
+                roleWinner = roleCandidate;
+                if (!roleWinner.getAttribute(NODE_ID_ATTR)) {
+                  roleWinner.setAttribute(NODE_ID_ATTR, entry.domId);
+                }
+                break;
               }
-              break;
             }
           }
           if (roleWinner) {
@@ -314,9 +480,16 @@ export const ACTIONS_INJECTION_SCRIPT = `
         refEntry: entry
           ? {
               domId: entry.domId,
+              href: captureRaw ? entry.href || null : null,
+              hasSemanticDescendants: Boolean(entry.hasSemanticDescendants),
               label: captureRaw ? entry.label || '' : '',
+              placeholder: captureRaw ? entry.placeholder || null : null,
               role: entry.role,
               selector: entry.selector,
+              snapshotId: entry.snapshotId || null,
+              tagName: entry.tagName || null,
+              targetType: entry.targetType || null,
+              text: captureRaw ? entry.text || '' : '',
             }
           : null,
         targetId: elementId,
@@ -698,7 +871,7 @@ export const ACTIONS_INJECTION_SCRIPT = `
         ids.push(id);
         var rect = el.getBoundingClientRect();
         bounds[id] = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
-        var role = el.getAttribute('role') || '';
+        var role = getElementRole(el) || '';
         if (role) roles[id] = role;
       }
       for (var j = 0; j < knownRefIds.length; j++) {

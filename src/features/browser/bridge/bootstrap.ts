@@ -418,6 +418,15 @@ export function buildBridgeBootstrapScript() {
         return type;
       }
 
+      if (
+        type === 'submit' ||
+        type === 'button' ||
+        type === 'reset' ||
+        type === 'image'
+      ) {
+        return 'button';
+      }
+
       if (type === 'search') {
         return 'searchbox';
       }
@@ -542,7 +551,10 @@ export function buildBridgeBootstrapScript() {
 
       seen.add(child);
 
-      if (isInteractiveElement(child) || isCursorInteractive(child)) {
+      const isInteractive = isInteractiveElement(child);
+      const isCursorClickable = !isInteractive && isCursorInteractive(child);
+
+      if (shouldExposeAsTarget(child, isInteractive, isCursorClickable)) {
         bucket.push(child);
       }
 
@@ -657,6 +669,67 @@ export function buildBridgeBootstrapScript() {
   // refMap stored on window for executor to resolve.
   var snapshotRefCounter = 0;
   var snapshotRefMap = {};
+  var currentSnapshotId = null;
+
+  function makeSnapshotId() {
+    return 'snapshot-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function getElementHref(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    if (element instanceof HTMLAnchorElement && typeof element.href === 'string') {
+      return normalizeString(element.href);
+    }
+
+    return normalizeString(element.getAttribute('href'));
+  }
+
+  function escapeSelectorValue(value) {
+    return value.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+  }
+
+  function buildElementSelector(element) {
+    var tag = element.tagName.toLowerCase();
+    var roleAttr = normalizeString(element.getAttribute('role'));
+    var typeAttr = normalizeString(element.getAttribute('type'));
+    var nameAttr = normalizeString(element.getAttribute('name'));
+    var placeholder = normalizeString(element.getAttribute('placeholder'));
+    var testId =
+      normalizeString(element.getAttribute('data-testid')) ||
+      normalizeString(element.getAttribute('data-test-id'));
+
+    var selector = tag;
+    if (roleAttr) selector += '[role="' + escapeSelectorValue(roleAttr) + '"]';
+    if (typeAttr) selector += '[type="' + escapeSelectorValue(typeAttr) + '"]';
+    if (nameAttr) selector += '[name="' + escapeSelectorValue(nameAttr) + '"]';
+    if (placeholder) selector += '[placeholder="' + escapeSelectorValue(placeholder) + '"]';
+    if (testId) selector += '[data-testid="' + escapeSelectorValue(testId) + '"]';
+    if (tag === 'a' && element.getAttribute('href')) selector += '[href]';
+    return selector;
+  }
+
+  function hasSemanticInteractiveDescendants(element) {
+    if (!element || !element.querySelector) {
+      return false;
+    }
+
+    return element.querySelector(INTERACTIVE_SELECTOR) !== null;
+  }
+
+  function shouldExposeAsTarget(element, isInteractive, isCursorClickable) {
+    if (isInteractive) {
+      return true;
+    }
+
+    if (!isCursorClickable) {
+      return false;
+    }
+
+    return !hasSemanticInteractiveDescendants(element);
+  }
 
   function assignShortRef(element) {
     snapshotRefCounter++;
@@ -664,17 +737,20 @@ export function buildBridgeBootstrapScript() {
     var domId = ensureNodeId(element);
     var role = getElementRole(element);
     var label = getElementLabel(element);
-
-    // Build a CSS selector for fallback lookup.
-    var tag = element.tagName.toLowerCase();
-    var roleAttr = element.getAttribute('role');
-    var selector = roleAttr ? tag + '[role="' + roleAttr + '"]' : tag;
+    var selector = buildElementSelector(element);
 
     snapshotRefMap[shortRef] = {
       domId: domId,
+      hasSemanticDescendants: hasSemanticInteractiveDescendants(element),
+      href: getElementHref(element),
       role: role,
       label: label || '',
+      placeholder: getElementPlaceholder(element),
       selector: selector,
+      snapshotId: currentSnapshotId,
+      tagName: element.tagName.toLowerCase(),
+      targetType: role === 'generic' ? 'generic' : 'semantic',
+      text: getElementText(element) || '',
     };
 
     return shortRef;
@@ -683,6 +759,7 @@ export function buildBridgeBootstrapScript() {
   function resetSnapshotRefs() {
     snapshotRefCounter = 0;
     snapshotRefMap = {};
+    currentSnapshotId = makeSnapshotId();
   }
 
   function isCursorInteractive(element) {
@@ -779,7 +856,13 @@ export function buildBridgeBootstrapScript() {
 
       var isCursorClickable = !isInteractive && isCursorInteractive(element);
 
-      if (isInteractive || isCursorClickable) {
+      var shouldExposeTarget = shouldExposeAsTarget(
+        element,
+        isInteractive,
+        isCursorClickable
+      );
+
+      if (shouldExposeTarget) {
         var role = isInteractive ? getElementRole(element) : 'generic';
         var label = getElementLabel(element);
         var value = isInteractive ? getElementValue(element) : null;
@@ -795,6 +878,7 @@ export function buildBridgeBootstrapScript() {
           var cs = getComputedStyleSafe(element);
           if (cs && cs.cursor === 'pointer') hints.push('cursor:pointer');
           if (element.getAttribute('tabindex')) hints.push('tabindex');
+          hints.push('exploratory');
           desc += ' clickable' + (hints.length ? ' [' + hints.join(', ') + ']' : '');
         }
         if (headingLevel) desc += ' [level=' + headingLevel + ']';

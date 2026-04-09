@@ -290,6 +290,60 @@ describe('session planning', () => {
     expect(next.activeItemId).toBe('todo-start');
   });
 
+  it('does not treat a search submit button as a text-entry field on homepage search', () => {
+    const plan = createSessionPlan('find a good deal on mens socks');
+    const next = reduceSessionPlan(plan, {
+      type: 'observation',
+      goal: 'find a good deal on mens socks',
+      observation: makeObservationResult({
+        axTreeText: [
+          '- header',
+          '  - form',
+          '    - searchbox "Search Amazon" [ref=e1]',
+          '    - button "Go" [ref=e2]',
+          '  - link "Deals" [ref=e3]',
+          '  - link "Best Sellers" [ref=e4]',
+        ].join('\n'),
+        debug: {
+          combinedRefMap: {
+            e1: {
+              domId: 'search-input',
+              label: 'Search Amazon',
+              role: 'searchbox',
+              selector: 'input[type="search"]',
+            },
+            e2: {
+              domId: 'search-submit',
+              label: 'Go',
+              role: 'button',
+              selector: 'input[type="submit"]',
+            },
+            e3: { domId: 'deals', label: 'Deals', role: 'link', selector: 'a' },
+            e4: {
+              domId: 'best-sellers',
+              label: 'Best Sellers',
+              role: 'link',
+              selector: 'a',
+            },
+            e5: { domId: 'cart', label: 'Cart', role: 'link', selector: 'a' },
+            e6: { domId: 'menu', label: 'Menu', role: 'button', selector: 'button' },
+            e7: { domId: 'music', label: 'Music', role: 'link', selector: 'a' },
+            e8: { domId: 'video', label: 'Video', role: 'link', selector: 'a' },
+          },
+          expectedFrameIds: [],
+          frameArtifacts: [],
+          timedOut: false,
+        },
+      }),
+      stepIndex: 1,
+      timestamp: '2026-04-09T00:00:00.000Z',
+      url: 'https://www.amazon.com/',
+    });
+
+    expect(next.phase).toBe('search');
+    expect(next.activeItemId).toBe('todo-start');
+  });
+
   it('blocks premature finish on results pages when the active todo is still unresolved', () => {
     const resultsPlan = reduceSessionPlan(createSessionPlan('find a good deal on mens socks'), {
       type: 'observation',
