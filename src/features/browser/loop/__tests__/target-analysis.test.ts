@@ -216,6 +216,50 @@ describe('buildInferenceTargetSummary', () => {
     expect(isEditableTargetEntry(opener ?? null)).toBe(false);
   });
 
+  it('keeps short option-like controls out of main content when they are not in structured containers', () => {
+    const summary = buildInferenceTargetSummary({
+      goal: 'find a good deal on mens socks',
+      observation: makeObservationResult(
+        {
+          e13: {
+            ancestorLandmarks: ['main'],
+            domId: 'filter-most-purchased',
+            label: 'Most Purchased',
+            landmark: 'main',
+            role: 'link',
+            selector: 'a[href]',
+            tagName: 'a',
+            targetType: 'semantic',
+            text: 'Most Purchased',
+          },
+          e26: {
+            ancestorLandmarks: ['main'],
+            containerId: 'card-1',
+            containerKind: 'card',
+            domId: 'product-title',
+            href: 'https://www.example.com/item/1',
+            label: 'COOPLUS 12 Pack Mens Cushioned Ankle Socks',
+            landmark: 'main',
+            role: 'link',
+            selector: 'a[href]',
+            tagName: 'a',
+            targetType: 'semantic',
+            text: 'COOPLUS 12 Pack Mens Cushioned Ankle Socks',
+          },
+        },
+        [
+          '- link "Most Purchased" [ref=e13]',
+          '- link "COOPLUS 12 Pack Mens Cushioned Ankle Socks" [ref=e26]',
+        ].join('\n'),
+      ),
+      plan: makePlan('results', 'Open a relevant result for: find a good deal on mens socks'),
+    });
+
+    expect(summary?.mainContent.map((entry) => entry.id)).toContain('e26');
+    expect(summary?.mainContent.map((entry) => entry.id)).not.toContain('e13');
+    expect(summary?.secondaryActions.map((entry) => entry.id)).toContain('e13');
+  });
+
   it('can analyze a target that falls outside the compact prompt summary', () => {
     const combinedRefMap: ObservationResult['debug']['combinedRefMap'] = {};
     for (let index = 1; index <= 8; index += 1) {

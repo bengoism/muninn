@@ -368,7 +368,9 @@ export function useAgentLoop(
               actionHistoryFrom: inferenceRequest.actionHistory.length,
               actionHistoryTo: reducedRequest.actionHistory.length,
               planningContextDropped: inferenceRequest.planningContext !== null,
-              targetSummaryDropped: inferenceRequest.targetSummary !== null,
+              targetSummaryReduced:
+                inferenceRequest.targetSummary !== null &&
+                reducedRequest.targetSummary !== null,
               treeTextLenFrom: inferenceRequest.axTreeText.length,
               treeTextLenTo: reducedRequest.axTreeText.length,
             });

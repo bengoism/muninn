@@ -2,8 +2,15 @@ import type {
   InferenceFailure,
   InferenceRequest,
   InferenceResponse,
+  InferenceTargetSummary,
   PlanningContextDebugRequest,
 } from '../../../types/agent';
+
+const REDUCED_MAIN_CONTENT_ITEMS = 3;
+const REDUCED_EDITABLE_ITEMS = 2;
+const REDUCED_EXPLORATORY_ITEMS = 2;
+const REDUCED_SECONDARY_ITEMS = 2;
+const REDUCED_GLOBAL_ITEMS = 2;
 
 export function shouldRetryInferenceWithoutPlanningContext(
   response: InferenceResponse,
@@ -53,7 +60,7 @@ export function buildReducedInferenceRequest(
   return {
     ...request,
     planningContext: null,
-    targetSummary: null,
+    targetSummary: compactTargetSummary(request.targetSummary),
     actionHistory: request.actionHistory.slice(-2),
     axTreeText: truncateTreeText(request.axTreeText, 2800),
   };
@@ -90,4 +97,20 @@ function truncateTreeText(treeText: string, maxChars: number): string {
 
   const truncated = treeText.slice(0, Math.max(0, maxChars - 32)).trimEnd();
   return `${truncated}\n... (truncated for fallback)`;
+}
+
+function compactTargetSummary(
+  summary: InferenceTargetSummary | null,
+): InferenceTargetSummary | null {
+  if (!summary) {
+    return null;
+  }
+
+  return {
+    editable: summary.editable.slice(0, REDUCED_EDITABLE_ITEMS),
+    exploratoryOpeners: summary.exploratoryOpeners.slice(0, REDUCED_EXPLORATORY_ITEMS),
+    globalControls: summary.globalControls.slice(0, REDUCED_GLOBAL_ITEMS),
+    mainContent: summary.mainContent.slice(0, REDUCED_MAIN_CONTENT_ITEMS),
+    secondaryActions: summary.secondaryActions.slice(0, REDUCED_SECONDARY_ITEMS),
+  };
 }
