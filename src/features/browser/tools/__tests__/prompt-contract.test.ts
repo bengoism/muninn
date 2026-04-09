@@ -14,13 +14,13 @@ describe('AgentRuntime prompt contract', () => {
     expect(source).toContain(
       'Prefer semantic refs such as links, buttons, searchboxes, textboxes, and comboboxes.',
     );
-    expect(source).toContain('Use the Target guidance section to understand which refs are editable');
+    expect(source).toContain('Use the Target guidance section to see candidates grouped by capability and page structure.');
     expect(source).toContain('Target guidance:');
-    expect(source).toContain('Current interaction intent:');
-    expect(source).toContain('title: "Preferred now"');
     expect(source).toContain('title: "Editable now"');
     expect(source).toContain('title: "Exploratory openers"');
-    expect(source).toContain('title: "Lower priority now"');
+    expect(source).toContain('title: "Main content candidates"');
+    expect(source).toContain('title: "Secondary actions"');
+    expect(source).toContain('title: "Global controls"');
     expect(source).toContain(
       'If typing into a field has no effect, try clicking or focusing the field, then observe again.',
     );

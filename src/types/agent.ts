@@ -130,15 +130,12 @@ export type TargetAffordance =
   | 'exploratory_opener'
   | 'container';
 
-export type TargetPriority = 'preferred' | 'neutral' | 'lower_priority';
-
-export type InteractionIntent =
-  | 'open_target'
-  | 'enter_text'
-  | 'choose_option'
-  | 'apply_filter'
-  | 'commit'
-  | 'explore';
+export type TargetSummaryGroup =
+  | 'editable'
+  | 'main_content'
+  | 'exploratory_opener'
+  | 'secondary_action'
+  | 'global_control';
 
 export type TargetSummaryEntry = {
   id: string;
@@ -152,16 +149,15 @@ export type TargetSummaryEntry = {
   isPrimaryInContainer: boolean;
   capabilities: TargetCapability[];
   affordances: TargetAffordance[];
-  priority: TargetPriority;
-  priorityReason: string;
+  group: TargetSummaryGroup;
 };
 
 export type InferenceTargetSummary = {
-  intent: InteractionIntent;
-  preferred: TargetSummaryEntry[];
+  mainContent: TargetSummaryEntry[];
   editable: TargetSummaryEntry[];
-  exploratory: TargetSummaryEntry[];
-  lowerPriority: TargetSummaryEntry[];
+  exploratoryOpeners: TargetSummaryEntry[];
+  secondaryActions: TargetSummaryEntry[];
+  globalControls: TargetSummaryEntry[];
 };
 
 export type PlanningContextDebugRequest = {

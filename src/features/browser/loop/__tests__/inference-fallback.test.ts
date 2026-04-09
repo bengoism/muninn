@@ -64,11 +64,11 @@ describe('inference fallback', () => {
       canReduceInferenceRequest(
         makeRequest({
           targetSummary: {
-            intent: 'open_target',
             editable: [],
-            exploratory: [],
-            lowerPriority: [],
-            preferred: [],
+            exploratoryOpeners: [],
+            globalControls: [],
+            mainContent: [],
+            secondaryActions: [],
           },
         }),
       ),
@@ -127,11 +127,11 @@ describe('inference fallback', () => {
           summary: 'Need overview',
         },
         targetSummary: {
-          intent: 'open_target',
           editable: [],
-          exploratory: [],
-          lowerPriority: [],
-          preferred: [],
+          exploratoryOpeners: [],
+          globalControls: [],
+          mainContent: [],
+          secondaryActions: [],
         },
       }),
     );

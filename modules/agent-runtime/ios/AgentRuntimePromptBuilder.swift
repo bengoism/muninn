@@ -21,7 +21,7 @@ final class AgentRuntimePromptBuilder {
 
     IMPORTANT: Elements with [ref=...] are interactive. You MUST use the exact short ref value (e.g. "e1") as the "id" parameter. Never use the element's label, description, or a DOM id like "ai-main-abc-123" as the id.
     Prefer semantic refs such as links, buttons, searchboxes, textboxes, and comboboxes. Treat generic clickable refs as exploratory fallbacks, not first-choice targets, especially on results pages.
-    Use the Target guidance section to understand which refs are editable, exploratory, preferred, or lower priority for the current step.
+    Use the Target guidance section to see candidates grouped by capability and page structure. Use the goal and current plan to choose the best target.
     If typing into a field has no effect, try clicking or focusing the field, then observe again. If that opens a modal, sheet, fullscreen editor, or expanded picker, retarget the actual active input before typing.
     If the active todo is still to open or inspect a result, do not call finish just because a results page is visible.
     Read the current todo list before each step. After choosing the next action, you may optionally propose bounded plan updates in a top-level "plan_updates" array. The runtime validates these updates before applying them.
@@ -232,14 +232,12 @@ final class AgentRuntimePromptBuilder {
     }
 
     var lines: [String] = []
-    if let intent = summary["intent"] as? String, !intent.isEmpty {
-      lines.append("Current interaction intent: \(intent)")
-    }
     var renderedIds = Set<String>()
-    appendTargetSection(title: "Preferred now", key: "preferred", from: summary, renderedIds: &renderedIds, to: &lines)
     appendTargetSection(title: "Editable now", key: "editable", from: summary, renderedIds: &renderedIds, to: &lines)
-    appendTargetSection(title: "Exploratory openers", key: "exploratory", from: summary, renderedIds: &renderedIds, to: &lines)
-    appendTargetSection(title: "Lower priority now", key: "lowerPriority", from: summary, renderedIds: &renderedIds, to: &lines)
+    appendTargetSection(title: "Main content candidates", key: "mainContent", from: summary, renderedIds: &renderedIds, to: &lines)
+    appendTargetSection(title: "Exploratory openers", key: "exploratoryOpeners", from: summary, renderedIds: &renderedIds, to: &lines)
+    appendTargetSection(title: "Secondary actions", key: "secondaryActions", from: summary, renderedIds: &renderedIds, to: &lines)
+    appendTargetSection(title: "Global controls", key: "globalControls", from: summary, renderedIds: &renderedIds, to: &lines)
 
     return lines.isEmpty ? nil : lines.joined(separator: "\n")
   }

@@ -308,11 +308,11 @@ export function useAgentLoop(
           });
           if (targetSummary) {
             logStep(stepNum, 'targets', {
-              intent: targetSummary.intent,
               editable: targetSummary.editable.map((entry) => entry.id),
-              exploratory: targetSummary.exploratory.map((entry) => entry.id),
-              lowerPriority: targetSummary.lowerPriority.map((entry) => entry.id),
-              preferred: targetSummary.preferred.map((entry) => entry.id),
+              exploratory: targetSummary.exploratoryOpeners.map((entry) => entry.id),
+              global: targetSummary.globalControls.map((entry) => entry.id),
+              mainContent: targetSummary.mainContent.map((entry) => entry.id),
+              secondary: targetSummary.secondaryActions.map((entry) => entry.id),
             });
           }
           if (observation.axTreeText) {
@@ -635,7 +635,7 @@ export function useAgentLoop(
               logStep(stepNum, 'guard', {
                 id: executableTargetId,
                 reason: 'non_editable_text_target',
-                detail: resolvedTargetSummaryEntry.priorityReason,
+                detail: resolvedTargetSummaryEntry.group,
               });
               chat.addMessage({
                 type: 'agent_step',

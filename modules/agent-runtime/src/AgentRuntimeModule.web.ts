@@ -25,8 +25,7 @@ class AgentRuntimeModule extends NativeModule {
         planningImageProvided: request.planningContext !== null,
         planPhase: request.sessionPlan?.phase ?? null,
         screenshotUri: request.screenshotUri,
-        targetSummaryIntent: request.targetSummary?.intent ?? null,
-        targetSummaryPreferred: request.targetSummary?.preferred.length ?? 0,
+        targetSummaryMainContent: request.targetSummary?.mainContent.length ?? 0,
       },
     };
   }

@@ -6,7 +6,6 @@ import type {
 import type { TargetReferenceState } from '../tools/types';
 import {
   analyzeTargetEntry,
-  buildInferenceTargetSummary,
 } from './target-analysis';
 
 type SemanticTargetRepairInput = {
@@ -45,18 +44,16 @@ export function repairGenericClickTarget(
     observation: input.observation,
     plan: input.plan,
   };
-  const summary = buildInferenceTargetSummary(analysisInput);
-  if (summary?.intent !== 'open_target') {
+  if (input.plan?.phase !== 'results') {
     return null;
   }
 
-  const targetEntry =
-    summary ? analyzeTargetEntry(targetId, analysisInput) : null;
+  const targetEntry = analyzeTargetEntry(targetId, analysisInput);
   if (!targetEntry || !targetEntry.containerId) {
     return null;
   }
 
-  if (targetEntry.targetType === 'semantic' && targetEntry.isPrimaryInContainer) {
+  if (targetEntry.group !== 'secondary_action') {
     return null;
   }
 
@@ -70,6 +67,9 @@ export function repairGenericClickTarget(
 
     const candidate = analyzeTargetEntry(candidateRef, analysisInput);
     if (!candidate || candidate.containerId !== targetEntry.containerId) {
+      continue;
+    }
+    if (candidate.group !== 'main_content') {
       continue;
     }
 
