@@ -24,6 +24,7 @@ struct AgentRuntimeRequest {
   let screenshotUri: String
   let screenshotUrl: URL
   let planningContext: AgentRuntimePlanningContext?
+  let targetSummary: [String: Any]?
   let axSnapshot: [[String: Any]]
   let axTreeText: String
   let actionHistory: [[String: Any]]
@@ -75,6 +76,7 @@ struct AgentRuntimeRequest {
     self.screenshotUri = screenshotUri
     self.screenshotUrl = screenshotUrl
     self.planningContext = try AgentRuntimePlanningContext(dictionary: dictionary["planningContext"])
+    self.targetSummary = dictionary["targetSummary"] as? [String: Any]
     self.axSnapshot = dictionary["axSnapshot"] as? [[String: Any]] ?? []
     self.axTreeText = dictionary["axTreeText"] as? String ?? ""
     self.actionHistory = dictionary["actionHistory"] as? [[String: Any]] ?? []

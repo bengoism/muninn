@@ -418,6 +418,15 @@ export function buildBridgeBootstrapScript() {
         return type;
       }
 
+      if (
+        type === 'submit' ||
+        type === 'button' ||
+        type === 'reset' ||
+        type === 'image'
+      ) {
+        return 'button';
+      }
+
       if (type === 'search') {
         return 'searchbox';
       }
@@ -542,7 +551,10 @@ export function buildBridgeBootstrapScript() {
 
       seen.add(child);
 
-      if (isInteractiveElement(child) || isCursorInteractive(child)) {
+      const isInteractive = isInteractiveElement(child);
+      const isCursorClickable = !isInteractive && isCursorInteractive(child);
+
+      if (shouldExposeAsTarget(child, isInteractive, isCursorClickable)) {
         bucket.push(child);
       }
 
@@ -637,6 +649,16 @@ export function buildBridgeBootstrapScript() {
     ASIDE: 'complementary', SECTION: 'region', ARTICLE: 'article',
     FORM: 'form', DIALOG: 'dialog',
   };
+  var NORMALIZED_LANDMARK_ROLES = new Set([
+    'main', 'header', 'footer', 'navigation', 'complementary',
+    'region', 'article', 'form', 'dialog',
+  ]);
+  var STRUCTURAL_CONTAINER_TAGS = new Set([
+    'LI', 'ARTICLE', 'SECTION', 'FIELDSET', 'DETAILS', 'FORM',
+  ]);
+  var STRUCTURAL_CONTAINER_ROLES = new Set([
+    'listitem', 'option', 'group', 'row', 'tabpanel',
+  ]);
 
   var HEADING_TAGS = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
 
@@ -657,6 +679,221 @@ export function buildBridgeBootstrapScript() {
   // refMap stored on window for executor to resolve.
   var snapshotRefCounter = 0;
   var snapshotRefMap = {};
+  var currentSnapshotId = null;
+  var semanticDescendantCountCache = new WeakMap();
+  var targetContainerCache = new WeakMap();
+
+  function makeSnapshotId() {
+    return 'snapshot-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function getElementHref(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    if (element instanceof HTMLAnchorElement && typeof element.href === 'string') {
+      return normalizeString(element.href);
+    }
+
+    return normalizeString(element.getAttribute('href'));
+  }
+
+  function escapeSelectorValue(value) {
+    return value.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+  }
+
+  function buildElementSelector(element) {
+    var tag = element.tagName.toLowerCase();
+    var roleAttr = normalizeString(element.getAttribute('role'));
+    var typeAttr = normalizeString(element.getAttribute('type'));
+    var nameAttr = normalizeString(element.getAttribute('name'));
+    var placeholder = normalizeString(element.getAttribute('placeholder'));
+    var testId =
+      normalizeString(element.getAttribute('data-testid')) ||
+      normalizeString(element.getAttribute('data-test-id'));
+
+    var selector = tag;
+    if (roleAttr) selector += '[role="' + escapeSelectorValue(roleAttr) + '"]';
+    if (typeAttr) selector += '[type="' + escapeSelectorValue(typeAttr) + '"]';
+    if (nameAttr) selector += '[name="' + escapeSelectorValue(nameAttr) + '"]';
+    if (placeholder) selector += '[placeholder="' + escapeSelectorValue(placeholder) + '"]';
+    if (testId) selector += '[data-testid="' + escapeSelectorValue(testId) + '"]';
+    if (tag === 'a' && element.getAttribute('href')) selector += '[href]';
+    return selector;
+  }
+
+  function normalizeLandmarkRole(role) {
+    if (!role) {
+      return null;
+    }
+
+    if (role === 'banner') {
+      return 'header';
+    }
+    if (role === 'contentinfo') {
+      return 'footer';
+    }
+    if (role === 'search') {
+      return 'form';
+    }
+
+    return NORMALIZED_LANDMARK_ROLES.has(role) ? role : null;
+  }
+
+  function getElementLandmarkRole(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    var explicitRole = normalizeLandmarkRole(normalizeString(element.getAttribute('role')));
+    if (explicitRole) {
+      return explicitRole;
+    }
+
+    return LANDMARK_TAGS[element.tagName] || null;
+  }
+
+  function getAncestorLandmarks(element) {
+    var landmarks = [];
+    var seen = new Set();
+    var current = element;
+
+    while (current && current instanceof Element) {
+      var landmark = getElementLandmarkRole(current);
+      if (landmark && !seen.has(landmark)) {
+        landmarks.push(landmark);
+        seen.add(landmark);
+      }
+      current = current.parentElement;
+    }
+
+    return landmarks;
+  }
+
+  function getPrimaryLandmark(element) {
+    var landmarks = getAncestorLandmarks(element);
+    for (var i = 0; i < landmarks.length; i++) {
+      if (landmarks[i] !== 'form') {
+        return landmarks[i];
+      }
+    }
+
+    return landmarks.length > 0 ? landmarks[0] : null;
+  }
+
+  function countSemanticInteractiveDescendants(element) {
+    if (!element || !element.querySelectorAll) {
+      return 0;
+    }
+
+    if (semanticDescendantCountCache.has(element)) {
+      return semanticDescendantCountCache.get(element) || 0;
+    }
+
+    var interactiveDescendants = element.querySelectorAll(INTERACTIVE_SELECTOR);
+    var count = 0;
+    for (var index = 0; index < interactiveDescendants.length; index += 1) {
+      var candidate = interactiveDescendants.item(index);
+      if (candidate && getElementRole(candidate) !== 'generic') {
+        count += 1;
+      }
+    }
+
+    semanticDescendantCountCache.set(element, count);
+    return count;
+  }
+
+  function hasSemanticInteractiveDescendants(element) {
+    return countSemanticInteractiveDescendants(element) > 0;
+  }
+
+  function describeContainerKind(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    var tagName = element.tagName;
+    var role = normalizeString(element.getAttribute('role'));
+
+    if (tagName === 'LI' || role === 'listitem') {
+      return 'list_item';
+    }
+    if (tagName === 'FORM') {
+      return 'form_group';
+    }
+    if (tagName === 'FIELDSET' || role === 'group') {
+      return 'group';
+    }
+    if (role === 'option') {
+      return 'option_group';
+    }
+    if (role === 'row') {
+      return 'row';
+    }
+    if (
+      tagName === 'ARTICLE' ||
+      tagName === 'SECTION' ||
+      tagName === 'DETAILS' ||
+      countSemanticInteractiveDescendants(element) >= 3
+    ) {
+      return 'card';
+    }
+
+    return 'group';
+  }
+
+  function isStructuralContainerCandidate(element) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    var landmark = getElementLandmarkRole(element);
+    if (landmark && landmark !== 'form') {
+      return false;
+    }
+
+    var role = normalizeString(element.getAttribute('role'));
+    if (STRUCTURAL_CONTAINER_TAGS.has(element.tagName) || STRUCTURAL_CONTAINER_ROLES.has(role)) {
+      return true;
+    }
+
+    return countSemanticInteractiveDescendants(element) >= 3;
+  }
+
+  function getTargetContainer(element) {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    if (targetContainerCache.has(element)) {
+      return targetContainerCache.get(element) || null;
+    }
+
+    var current = element.parentElement;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (isStructuralContainerCandidate(current)) {
+        targetContainerCache.set(element, current);
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    targetContainerCache.set(element, null);
+    return null;
+  }
+
+  function shouldExposeAsTarget(element, isInteractive, isCursorClickable) {
+    if (isInteractive) {
+      return true;
+    }
+
+    if (!isCursorClickable) {
+      return false;
+    }
+
+    return !hasSemanticInteractiveDescendants(element);
+  }
 
   function assignShortRef(element) {
     snapshotRefCounter++;
@@ -664,17 +901,26 @@ export function buildBridgeBootstrapScript() {
     var domId = ensureNodeId(element);
     var role = getElementRole(element);
     var label = getElementLabel(element);
-
-    // Build a CSS selector for fallback lookup.
-    var tag = element.tagName.toLowerCase();
-    var roleAttr = element.getAttribute('role');
-    var selector = roleAttr ? tag + '[role="' + roleAttr + '"]' : tag;
+    var selector = buildElementSelector(element);
+    var container = getTargetContainer(element);
+    var ancestorLandmarks = getAncestorLandmarks(element);
 
     snapshotRefMap[shortRef] = {
+      ancestorLandmarks: ancestorLandmarks,
+      containerId: container ? ensureNodeId(container) : null,
+      containerKind: container ? describeContainerKind(container) : null,
       domId: domId,
+      hasSemanticDescendants: hasSemanticInteractiveDescendants(element),
+      href: getElementHref(element),
+      landmark: getPrimaryLandmark(element),
       role: role,
       label: label || '',
+      placeholder: getElementPlaceholder(element),
       selector: selector,
+      snapshotId: currentSnapshotId,
+      tagName: element.tagName.toLowerCase(),
+      targetType: role === 'generic' ? 'generic' : 'semantic',
+      text: getElementText(element) || '',
     };
 
     return shortRef;
@@ -683,6 +929,9 @@ export function buildBridgeBootstrapScript() {
   function resetSnapshotRefs() {
     snapshotRefCounter = 0;
     snapshotRefMap = {};
+    currentSnapshotId = makeSnapshotId();
+    semanticDescendantCountCache = new WeakMap();
+    targetContainerCache = new WeakMap();
   }
 
   function isCursorInteractive(element) {
@@ -779,7 +1028,13 @@ export function buildBridgeBootstrapScript() {
 
       var isCursorClickable = !isInteractive && isCursorInteractive(element);
 
-      if (isInteractive || isCursorClickable) {
+      var shouldExposeTarget = shouldExposeAsTarget(
+        element,
+        isInteractive,
+        isCursorClickable
+      );
+
+      if (shouldExposeTarget) {
         var role = isInteractive ? getElementRole(element) : 'generic';
         var label = getElementLabel(element);
         var value = isInteractive ? getElementValue(element) : null;
@@ -795,6 +1050,7 @@ export function buildBridgeBootstrapScript() {
           var cs = getComputedStyleSafe(element);
           if (cs && cs.cursor === 'pointer') hints.push('cursor:pointer');
           if (element.getAttribute('tabindex')) hints.push('tabindex');
+          hints.push('exploratory');
           desc += ' clickable' + (hints.length ? ' [' + hints.join(', ') + ']' : '');
         }
         if (headingLevel) desc += ' [level=' + headingLevel + ']';

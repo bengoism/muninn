@@ -117,6 +117,20 @@ describe('getRetryDirective — click', () => {
     expect(directive.retry).toBe(false);
   });
 
+  it('returns no retry for generic click targets', () => {
+    const snapshot = makeSnapshot({
+      axNodeRoles: new Map([['btn-1', 'generic']]),
+    });
+    const directive = getRetryDirective(
+      'click',
+      { id: 'btn-1' },
+      makeValidation(),
+      0,
+      snapshot,
+    );
+    expect(directive.retry).toBe(false);
+  });
+
   it('returns no retry on success outcome', () => {
     const directive = getRetryDirective(
       'click',

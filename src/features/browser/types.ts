@@ -91,9 +91,20 @@ export type BrowserAxSnapshotNodePayload = {
 
 export type BrowserAxSnapshotRefEntry = {
   domId: string;
+  hasSemanticDescendants?: boolean;
+  href?: string | null;
   role: string;
   label: string;
+  landmark?: string | null;
+  ancestorLandmarks?: string[];
+  containerId?: string | null;
+  containerKind?: string | null;
+  placeholder?: string | null;
   selector: string;
+  snapshotId?: string;
+  tagName?: string;
+  targetType?: 'semantic' | 'generic';
+  text?: string;
 };
 
 export type BrowserConsoleMessageLevel = 'log' | 'warn' | 'error' | 'info' | 'debug';

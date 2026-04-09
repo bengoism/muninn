@@ -33,6 +33,10 @@ const FALLBACK_CHAINS: Partial<Record<ToolName, FallbackEntry[]>> = {
         if (!targetId) return null;
 
         const domTargetId = snapshot.refToDomId.get(targetId) ?? targetId;
+        const targetRole = snapshot.axNodeRoles.get(domTargetId) ?? null;
+        if (targetRole === 'generic') {
+          return null;
+        }
         const bounds = snapshot.axNodeBounds.get(domTargetId);
         if (!bounds) return null;
 
