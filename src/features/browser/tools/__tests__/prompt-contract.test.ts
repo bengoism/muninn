@@ -16,6 +16,7 @@ describe('AgentRuntime prompt contract', () => {
     );
     expect(source).toContain('Use the Target guidance section to understand which refs are editable');
     expect(source).toContain('Target guidance:');
+    expect(source).toContain('Current interaction intent:');
     expect(source).toContain('title: "Preferred now"');
     expect(source).toContain('title: "Editable now"');
     expect(source).toContain('title: "Exploratory openers"');

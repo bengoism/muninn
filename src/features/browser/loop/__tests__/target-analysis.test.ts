@@ -67,15 +67,30 @@ function makePlan(phase: SessionPlan['phase'], activeText: string): SessionPlan 
 }
 
 describe('buildInferenceTargetSummary', () => {
-  it('prefers navigation leaf targets over direct-action buttons for open-oriented steps', () => {
+  it('prefers main-content primary links over global controls for open-oriented steps', () => {
     const summary = buildInferenceTargetSummary({
       goal: 'find a good deal on mens socks',
       observation: makeObservationResult(
         {
+          e1: {
+            ancestorLandmarks: ['header'],
+            domId: 'menu',
+            label: 'Open All Categories Menu',
+            landmark: 'header',
+            role: 'button',
+            selector: 'button',
+            tagName: 'button',
+            targetType: 'semantic',
+            text: 'Open All Categories Menu',
+          },
           e26: {
+            ancestorLandmarks: ['main'],
+            containerId: 'card-1',
+            containerKind: 'card',
             domId: 'product-title',
             href: 'https://www.example.com/item/1',
             label: 'COOPLUS 12 Pack Mens Cushioned Ankle Socks',
+            landmark: 'main',
             role: 'link',
             selector: 'a[href]',
             tagName: 'a',
@@ -83,8 +98,12 @@ describe('buildInferenceTargetSummary', () => {
             text: 'COOPLUS 12 Pack Mens Cushioned Ankle Socks',
           },
           e30: {
+            ancestorLandmarks: ['main'],
+            containerId: 'card-1',
+            containerKind: 'card',
             domId: 'add-to-cart',
             label: 'Add to cart',
+            landmark: 'main',
             role: 'button',
             selector: 'button[type="button"]',
             tagName: 'button',
@@ -93,6 +112,7 @@ describe('buildInferenceTargetSummary', () => {
           },
         },
         [
+          '- button "Open All Categories Menu" [ref=e1]',
           '- link "COOPLUS 12 Pack Mens Cushioned Ankle Socks" [ref=e26]',
           '- button "Add to cart" [ref=e30]',
         ].join('\n'),
@@ -100,8 +120,11 @@ describe('buildInferenceTargetSummary', () => {
       plan: makePlan('results', 'Open a relevant result for: find a good deal on mens socks'),
     });
 
+    expect(summary?.intent).toBe('open_target');
     expect(summary?.preferred.map((entry) => entry.id)).toContain('e26');
+    expect(summary?.preferred[0]?.id).toBe('e26');
     expect(summary?.lowerPriority.map((entry) => entry.id)).toContain('e30');
+    expect(summary?.lowerPriority.map((entry) => entry.id)).toContain('e1');
   });
 
   it('marks generic non-editable launchers as exploratory when no editable field is available', () => {
@@ -136,6 +159,7 @@ describe('buildInferenceTargetSummary', () => {
       plan: makePlan('search', 'Make initial progress toward: find a good flight to nyc in may'),
     });
 
+    expect(summary?.intent).toBe('explore');
     expect(summary?.editable).toHaveLength(0);
     expect(summary?.exploratory.map((entry) => entry.id)).toContain('e2');
     const opener = getTargetSummaryEntry(summary ?? null, 'e2');
@@ -184,6 +208,7 @@ describe('buildInferenceTargetSummary', () => {
       observation,
       plan,
     });
+    expect(summary?.intent).toBe('explore');
     expect(analyzed?.affordances).toContain('exploratory_opener');
     expect(isEditableTargetEntry(analyzed ?? null)).toBe(false);
   });
@@ -221,6 +246,7 @@ describe('buildInferenceTargetSummary', () => {
       plan: makePlan('search', 'Search or navigate toward: find a good deal on mens socks'),
     });
 
+    expect(summary?.intent).toBe('enter_text');
     expect(summary?.editable.map((entry) => entry.id)).toContain('e14');
     expect(summary?.editable.map((entry) => entry.id)).not.toContain('e38');
     expect(isEditableTargetEntry(getTargetSummaryEntry(summary ?? null, 'e14'))).toBe(true);

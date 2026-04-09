@@ -232,6 +232,9 @@ final class AgentRuntimePromptBuilder {
     }
 
     var lines: [String] = []
+    if let intent = summary["intent"] as? String, !intent.isEmpty {
+      lines.append("Current interaction intent: \(intent)")
+    }
     var renderedIds = Set<String>()
     appendTargetSection(title: "Preferred now", key: "preferred", from: summary, renderedIds: &renderedIds, to: &lines)
     appendTargetSection(title: "Editable now", key: "editable", from: summary, renderedIds: &renderedIds, to: &lines)
@@ -269,8 +272,20 @@ final class AgentRuntimePromptBuilder {
       let label = (item["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       let capabilities = item["capabilities"] as? [String] ?? []
       let affordances = item["affordances"] as? [String] ?? []
+      let landmark = item["landmark"] as? String
+      let containerKind = item["containerKind"] as? String
+      let isPrimaryInContainer = item["isPrimaryInContainer"] as? Bool ?? false
 
       var line = "- \(id) | \(targetType) | \(role)"
+      if let landmark, !landmark.isEmpty {
+        line += " | \(landmark)"
+      }
+      if let containerKind, !containerKind.isEmpty {
+        line += " | \(containerKind)"
+      }
+      if isPrimaryInContainer {
+        line += " | primary"
+      }
       if !capabilities.isEmpty {
         line += " | \(capabilities.joined(separator: ","))"
       }

@@ -95,6 +95,10 @@ export type BrowserAxSnapshotRefEntry = {
   href?: string | null;
   role: string;
   label: string;
+  landmark?: string | null;
+  ancestorLandmarks?: string[];
+  containerId?: string | null;
+  containerKind?: string | null;
   placeholder?: string | null;
   selector: string;
   snapshotId?: string;

@@ -1,5 +1,6 @@
 import type {
   InferenceTargetSummary,
+  InteractionIntent,
   ObservationRefEntry,
   ObservationResult,
   SessionPlan,
@@ -23,19 +24,32 @@ type AnalyzeTargetInput = {
 const MAX_SECTION_ITEMS = 5;
 const MAX_EDITABLE_ITEMS = 3;
 const MAX_EXPLORATORY_ITEMS = 3;
+const GLOBAL_LANDMARKS = new Set(['header', 'footer', 'navigation']);
+const MAIN_LANDMARKS = new Set(['main', 'article', 'region']);
+const STRUCTURAL_CONTAINERS = new Set(['card', 'list_item', 'row']);
 
 export function buildInferenceTargetSummary(
   input: AnalyzeTargetInput,
 ): InferenceTargetSummary | null {
   const descriptors = Object.entries(input.observation.debug.combinedRefMap)
-    .map(([id, entry]) => describeTarget(id, entry, input))
+    .map(([id, entry]) => describeTarget(id, entry))
     .filter((entry): entry is TargetDescriptor => entry !== null);
 
   if (descriptors.length === 0) {
     return null;
   }
 
+  markPrimaryTargets(descriptors);
+  const intent = resolveInteractionIntent(input, descriptors);
+  descriptors.forEach((descriptor) => {
+    const ranked = rankTarget(descriptor, intent);
+    descriptor.priority = ranked.priority;
+    descriptor.priorityReason = ranked.priorityReason;
+    descriptor.score = ranked.score;
+  });
+
   return {
+    intent,
     preferred: descriptors
       .filter((entry) => entry.priority === 'preferred')
       .sort(compareByScore)
@@ -81,13 +95,26 @@ export function analyzeTargetEntry(
   targetId: string,
   input: AnalyzeTargetInput,
 ): TargetSummaryEntry | null {
-  const entry = input.observation.debug.combinedRefMap[targetId];
-  if (!entry) {
+  const descriptors = Object.entries(input.observation.debug.combinedRefMap)
+    .map(([id, entry]) => describeTarget(id, entry))
+    .filter((entry): entry is TargetDescriptor => entry !== null);
+  if (descriptors.length === 0) {
     return null;
   }
 
-  const descriptor = describeTarget(targetId, entry, input);
-  return descriptor ? stripDescriptor(descriptor) : null;
+  markPrimaryTargets(descriptors);
+  const intent = resolveInteractionIntent(input, descriptors);
+  const descriptor = descriptors.find((entry) => entry.id === targetId);
+  if (!descriptor) {
+    return null;
+  }
+
+  const ranked = rankTarget(descriptor, intent);
+  descriptor.priority = ranked.priority;
+  descriptor.priorityReason = ranked.priorityReason;
+  descriptor.score = ranked.score;
+
+  return stripDescriptor(descriptor);
 }
 
 export function isEditableTargetEntry(
@@ -96,10 +123,18 @@ export function isEditableTargetEntry(
   return Boolean(entry?.capabilities.includes('type') || entry?.capabilities.includes('select'));
 }
 
+export function deriveInteractionIntent(
+  input: AnalyzeTargetInput,
+): InteractionIntent {
+  const descriptors = Object.entries(input.observation.debug.combinedRefMap)
+    .map(([id, entry]) => describeTarget(id, entry))
+    .filter((entry): entry is TargetDescriptor => entry !== null);
+  return resolveInteractionIntent(input, descriptors);
+}
+
 function describeTarget(
   id: string,
   entry: ObservationRefEntry,
-  input: AnalyzeTargetInput,
 ): TargetDescriptor | null {
   const targetType = resolveTargetType(entry);
   const label = compactLabel(entry);
@@ -109,24 +144,21 @@ function describeTarget(
   const editable =
     capabilities.includes('type') || capabilities.includes('select');
 
-  const { priority, priorityReason, score } = rankTarget(
-    capabilities,
-    affordances,
-    targetType,
-    label,
-    input.plan,
-  );
-
   return {
     affordances,
+    ancestorLandmarks: entry.ancestorLandmarks ?? [],
     capabilities,
+    containerId: entry.containerId ?? null,
+    containerKind: entry.containerKind ?? null,
     editable,
     id,
+    isPrimaryInContainer: false,
     label,
-    priority,
-    priorityReason,
+    landmark: entry.landmark ?? null,
+    priority: 'neutral',
+    priorityReason: 'Useful but not strongly preferred for the current step.',
     role,
-    score,
+    score: 0,
     targetType,
   };
 }
@@ -189,11 +221,11 @@ function deriveAffordances(
     affordances.add('direct_action');
   }
 
-  if (/\b(show|hide|more|details|expand|collapse|learn more)\b/.test(label)) {
+  if (/\b(show|hide|more|details|expand|collapse|learn more|filters?)\b/.test(label)) {
     affordances.add('disclosure');
   }
 
-  if (/\b(increase|decrease|next|previous|minus|plus)\b/.test(label)) {
+  if (/\b(increase|decrease|next|previous|minus|plus|qty|quantity)\b/.test(label)) {
     affordances.add('adjust_value');
   }
 
@@ -218,84 +250,279 @@ function deriveAffordances(
   return [...affordances];
 }
 
-function rankTarget(
-  capabilities: TargetCapability[],
-  affordances: TargetAffordance[],
-  targetType: 'semantic' | 'generic',
-  label: string,
-  plan: SessionPlan | null,
-): { priority: TargetPriority; priorityReason: string; score: number } {
+function resolveInteractionIntent(
+  input: AnalyzeTargetInput,
+  descriptors: TargetDescriptor[],
+): InteractionIntent {
   const activeText =
-    plan?.items.find((item) => item.id === plan.activeItemId)?.text ?? '';
-  const goalText = `${plan?.phase ?? ''} ${activeText}`.toLowerCase();
-  const wantsNavigation = /\b(open|inspect|review|view|visit|navigate)\b/.test(goalText);
-  const wantsTextEntry = /\b(search|enter|type|fill|complete|choose|select)\b/.test(goalText);
-  const wantsCommit = /\b(submit|apply|confirm|book|buy|purchase|checkout|add)\b/.test(goalText);
+    input.plan?.items.find((item) => item.id === input.plan?.activeItemId)?.text ?? '';
+  const combined = normalize(
+    [input.goal, input.plan?.phase ?? '', activeText].filter(Boolean).join(' '),
+  );
+  const hasEditable = descriptors.some((descriptor) => descriptor.editable);
 
+  if (/\b(filter|sort|refine|narrow)\b/.test(combined)) {
+    return 'apply_filter';
+  }
+
+  if (/\b(buy|purchase|checkout|confirm|submit|book|place order|pay)\b/.test(combined)) {
+    return 'commit';
+  }
+
+  if (/\b(choose|pick|select option|select a|variant|size|color|date|time)\b/.test(combined)) {
+    return 'choose_option';
+  }
+
+  if (
+    (input.plan?.phase === 'search' || input.plan?.phase === 'form') &&
+    hasEditable
+  ) {
+    return 'enter_text';
+  }
+
+  if (/\b(open|inspect|review|view|visit|navigate|result|details?)\b/.test(combined)) {
+    return 'open_target';
+  }
+
+  if (input.plan?.phase === 'results' || input.plan?.phase === 'detail') {
+    return 'open_target';
+  }
+
+  if (
+    input.plan?.phase === 'search' ||
+    input.plan?.phase === 'form' ||
+    /\b(search|enter|type|fill|complete)\b/.test(combined)
+  ) {
+    return hasEditable ? 'enter_text' : 'explore';
+  }
+
+  return hasEditable ? 'enter_text' : 'explore';
+}
+
+function markPrimaryTargets(descriptors: TargetDescriptor[]): void {
+  const byContainer = new Map<string, TargetDescriptor[]>();
+
+  for (const descriptor of descriptors) {
+    if (!descriptor.containerId) {
+      continue;
+    }
+
+    const bucket = byContainer.get(descriptor.containerId) ?? [];
+    bucket.push(descriptor);
+    byContainer.set(descriptor.containerId, bucket);
+  }
+
+  for (const bucket of byContainer.values()) {
+    let primary: TargetDescriptor | null = null;
+
+    for (const descriptor of bucket) {
+      const candidateScore = scorePrimaryCandidate(descriptor);
+      if (!primary || candidateScore > scorePrimaryCandidate(primary)) {
+        primary = descriptor;
+      }
+    }
+
+    if (primary) {
+      primary.isPrimaryInContainer = true;
+    }
+  }
+}
+
+function scorePrimaryCandidate(descriptor: TargetDescriptor): number {
+  let score = 0;
+  const wordCount = descriptor.label.split(/\s+/).filter(Boolean).length;
+
+  if (descriptor.targetType === 'semantic') {
+    score += 20;
+  } else {
+    score -= 30;
+  }
+  if (descriptor.affordances.includes('navigation_leaf')) {
+    score += 90;
+  }
+  if (descriptor.affordances.includes('text_entry')) {
+    score += 55;
+  }
+  if (descriptor.affordances.includes('direct_action')) {
+    score += 20;
+  }
+  if (descriptor.affordances.includes('container')) {
+    score -= 25;
+  }
+  if (wordCount >= 4 && wordCount <= 18) {
+    score += Math.min(40, wordCount * 3);
+  } else if (wordCount <= 2) {
+    score -= 15;
+  }
+  if (descriptor.landmark && GLOBAL_LANDMARKS.has(descriptor.landmark)) {
+    score -= 10;
+  }
+
+  return score;
+}
+
+function rankTarget(
+  descriptor: TargetDescriptor,
+  intent: InteractionIntent,
+): { priority: TargetPriority; priorityReason: string; score: number } {
   let score = 0;
   let priority: TargetPriority = 'neutral';
   let priorityReason = 'Useful but not strongly preferred for the current step.';
 
-  if (capabilities.includes('type') || capabilities.includes('select')) {
-    score += 50;
-  }
-  if (affordances.includes('navigation_leaf')) {
-    score += 40;
-  }
-  if (affordances.includes('direct_action')) {
-    score += 25;
-  }
-  if (targetType === 'semantic') {
+  const isGlobal = isGlobalControl(descriptor);
+  const isStructuredContent =
+    (descriptor.containerKind !== null && STRUCTURAL_CONTAINERS.has(descriptor.containerKind)) ||
+    (descriptor.landmark !== null && MAIN_LANDMARKS.has(descriptor.landmark));
+  const wordCount = descriptor.label.split(/\s+/).filter(Boolean).length;
+
+  if (descriptor.targetType === 'semantic') {
     score += 20;
   } else {
-    score -= 10;
+    score -= 20;
   }
-  if (affordances.includes('container')) {
-    score -= 15;
+  if (descriptor.editable) {
+    score += 45;
   }
-  if (label.length === 0) {
+  if (descriptor.affordances.includes('navigation_leaf')) {
+    score += 50;
+  }
+  if (descriptor.affordances.includes('direct_action')) {
+    score += 15;
+  }
+  if (descriptor.affordances.includes('option_like')) {
+    score += 10;
+  }
+  if (descriptor.affordances.includes('container')) {
+    score -= 25;
+  }
+  if (descriptor.isPrimaryInContainer) {
+    score += 25;
+  }
+  if (isStructuredContent) {
+    score += 20;
+  }
+  if (isGlobal) {
+    score -= 20;
+  }
+  if (wordCount >= 4 && wordCount <= 18) {
+    score += 20;
+  } else if (wordCount <= 2) {
     score -= 10;
   }
 
-  if (wantsTextEntry) {
-    if (capabilities.includes('type') || capabilities.includes('select')) {
-      score += 80;
+  if (intent === 'enter_text') {
+    if (descriptor.editable) {
+      score += 90;
       priority = 'preferred';
-      priorityReason = 'Editable control matches a search or form-oriented step.';
-    } else if (affordances.includes('exploratory_opener')) {
+      priorityReason = 'Editable control matches the current text-entry step.';
+    } else if (descriptor.affordances.includes('exploratory_opener')) {
       score += 35;
       priority = 'preferred';
-      priorityReason = 'Exploratory opener may reveal an editable control after activation.';
+      priorityReason = 'Exploratory opener may reveal a real editable control.';
     } else {
+      score -= 25;
+      priority = 'lower_priority';
+      priorityReason = 'Not directly editable for the current text-entry step.';
+    }
+  } else if (intent === 'open_target') {
+    if (
+      descriptor.affordances.includes('navigation_leaf') &&
+      descriptor.isPrimaryInContainer &&
+      !isGlobal
+    ) {
+      score += 95;
+      priority = 'preferred';
+      priorityReason = 'Primary navigation leaf fits an open-or-inspect step.';
+    } else if (
+      descriptor.affordances.includes('navigation_leaf') &&
+      isStructuredContent &&
+      !isGlobal
+    ) {
+      score += 75;
+      priority = 'preferred';
+      priorityReason = 'Main-content navigation target fits an open-or-inspect step.';
+    } else if (descriptor.affordances.includes('direct_action')) {
+      score -= 40;
+      priority = 'lower_priority';
+      priorityReason = 'Direct-action control is secondary to opening a target.';
+    } else if (descriptor.editable) {
+      score -= 35;
+      priority = 'lower_priority';
+      priorityReason = 'Editable control is less relevant than opening a result right now.';
+    } else if (isGlobal) {
+      score -= 30;
+      priority = 'lower_priority';
+      priorityReason = 'Global page chrome is less useful than a main-content target.';
+    }
+  } else if (intent === 'apply_filter') {
+    if (
+      descriptor.affordances.includes('option_like') ||
+      descriptor.affordances.includes('disclosure')
+    ) {
+      score += 70;
+      priority = 'preferred';
+      priorityReason = 'Option-like or disclosure control fits a filtering step.';
+    } else if (descriptor.affordances.includes('navigation_leaf')) {
       score -= 20;
       priority = 'lower_priority';
-      priorityReason = 'Not directly editable for a search or form-oriented step.';
+      priorityReason = 'Navigation is less useful than refining the current view.';
     }
-  } else if (wantsNavigation) {
-    if (affordances.includes('navigation_leaf')) {
+  } else if (intent === 'choose_option') {
+    if (descriptor.capabilities.includes('select') || descriptor.affordances.includes('option_like')) {
+      score += 65;
+      priority = 'preferred';
+      priorityReason = 'Selectable control fits an option-choosing step.';
+    } else if (descriptor.affordances.includes('exploratory_opener')) {
+      score += 20;
+      priority = 'preferred';
+      priorityReason = 'Exploratory opener may reveal more option controls.';
+    }
+  } else if (intent === 'commit') {
+    if (descriptor.affordances.includes('direct_action')) {
       score += 80;
       priority = 'preferred';
-      priorityReason = 'Navigation target fits an open or inspect-oriented step.';
-    } else if (affordances.includes('direct_action')) {
-      score -= 20;
+      priorityReason = 'Direct-action control fits a commit or confirm step.';
+    } else if (descriptor.affordances.includes('navigation_leaf')) {
+      score -= 10;
       priority = 'lower_priority';
-      priorityReason = 'Direct action control is less useful than navigation for this step.';
+      priorityReason = 'Navigation is less useful than committing the current step.';
     }
-  } else if (wantsCommit) {
-    if (affordances.includes('direct_action')) {
-      score += 60;
+  } else {
+    if (
+      (descriptor.affordances.includes('navigation_leaf') && !isGlobal) ||
+      descriptor.affordances.includes('exploratory_opener')
+    ) {
+      score += 25;
       priority = 'preferred';
-      priorityReason = 'Direct action control fits a commit or confirm-oriented step.';
-    } else if (affordances.includes('navigation_leaf')) {
-      score += 10;
+      priorityReason = 'Promising target for exploratory progress.';
     }
   }
 
-  if (priority === 'neutral' && targetType === 'generic') {
+  if (priority === 'neutral' && descriptor.targetType === 'generic') {
     priorityReason = 'Exploratory target can reveal more specific controls.';
   }
 
+  if (priority === 'neutral') {
+    if (score >= 110) {
+      priority = 'preferred';
+      priorityReason = 'Strong structural match for the current step.';
+    } else if (score <= 10) {
+      priority = 'lower_priority';
+      priorityReason = 'Less relevant than other available targets for this step.';
+    }
+  }
+
   return { priority, priorityReason, score };
+}
+
+function isGlobalControl(descriptor: TargetDescriptor): boolean {
+  if (descriptor.landmark && GLOBAL_LANDMARKS.has(descriptor.landmark)) {
+    return true;
+  }
+
+  return descriptor.ancestorLandmarks.some((landmark) =>
+    GLOBAL_LANDMARKS.has(landmark),
+  );
 }
 
 function compactLabel(entry: ObservationRefEntry): string {
@@ -320,9 +547,14 @@ function resolveTargetType(
 function stripDescriptor(entry: TargetDescriptor): TargetSummaryEntry {
   return {
     affordances: entry.affordances,
+    ancestorLandmarks: entry.ancestorLandmarks,
     capabilities: entry.capabilities,
+    containerId: entry.containerId,
+    containerKind: entry.containerKind,
     id: entry.id,
+    isPrimaryInContainer: entry.isPrimaryInContainer,
     label: entry.label,
+    landmark: entry.landmark,
     priority: entry.priority,
     priorityReason: entry.priorityReason,
     role: entry.role,

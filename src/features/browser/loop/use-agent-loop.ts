@@ -308,6 +308,7 @@ export function useAgentLoop(
           });
           if (targetSummary) {
             logStep(stepNum, 'targets', {
+              intent: targetSummary.intent,
               editable: targetSummary.editable.map((entry) => entry.id),
               exploratory: targetSummary.exploratory.map((entry) => entry.id),
               lowerPriority: targetSummary.lowerPriority.map((entry) => entry.id),

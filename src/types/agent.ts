@@ -58,6 +58,10 @@ export type ObservationRefEntry = {
   placeholder?: string | null;
   href?: string | null;
   hasSemanticDescendants?: boolean;
+  landmark?: string | null;
+  ancestorLandmarks?: string[];
+  containerId?: string | null;
+  containerKind?: string | null;
 };
 
 export type AgentActionStatus =
@@ -128,11 +132,24 @@ export type TargetAffordance =
 
 export type TargetPriority = 'preferred' | 'neutral' | 'lower_priority';
 
+export type InteractionIntent =
+  | 'open_target'
+  | 'enter_text'
+  | 'choose_option'
+  | 'apply_filter'
+  | 'commit'
+  | 'explore';
+
 export type TargetSummaryEntry = {
   id: string;
   label: string;
   role: string;
   targetType: 'semantic' | 'generic';
+  landmark: string | null;
+  ancestorLandmarks: string[];
+  containerId: string | null;
+  containerKind: string | null;
+  isPrimaryInContainer: boolean;
   capabilities: TargetCapability[];
   affordances: TargetAffordance[];
   priority: TargetPriority;
@@ -140,6 +157,7 @@ export type TargetSummaryEntry = {
 };
 
 export type InferenceTargetSummary = {
+  intent: InteractionIntent;
   preferred: TargetSummaryEntry[];
   editable: TargetSummaryEntry[];
   exploratory: TargetSummaryEntry[];
