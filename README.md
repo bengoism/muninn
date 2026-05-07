@@ -61,7 +61,7 @@ This matters for three reasons:
 
 1. **Browser layer** — `WKWebView` via `react-native-webview` renders pages, captures the viewport, and serves as the execution surface for browser actions.
 2. **Bridge layer** — Expo + React Native orchestrate browser state, observation timing, action execution, and message passing between JavaScript and native code. Zustand holds browser and agent session state.
-3. **Intelligence layer** — native Swift modules host the on-device inference runtime. The target model is **Gemma 4 E2B** (`gemma-4-e2b-it`, ~2.6 GB), a multimodal vision-language model that processes both the viewport screenshot and the accessibility tree to choose the next action. The model runs on-device via **LiteRT-LM** (CPU/GPU backends) — no cloud calls required. A replay-based backend is also available for deterministic testing.
+3. **Intelligence layer** — native Swift modules host the on-device inference runtime. The target model is **Gemma 4 E2B** (`gemma-4-e2b-it`, ~2.6 GB), a multimodal vision-language model that processes both the viewport screenshot and the accessibility tree to choose the next action. The model runs on-device via **LiteRT-LM** with a GPU-first backend order and CPU fallback — no cloud calls required. A replay-based backend is also available for deterministic testing.
 
 ## How The Agent Works
 
@@ -138,6 +138,20 @@ cp .env.example .env
 ```
 
 Set `EXPO_PUBLIC_DEFAULT_URL` in `.env` if you want the browser to open somewhere other than `https://example.com`.
+
+## LiteRT-LM iOS Runtime
+
+The native iOS runtime is pinned to LiteRT-LM `v0.11.0` and the May 5, 2026 Gemma 4 E2B LiteRT-LM checkpoint, which is the checkpoint Google calls out for speculative decoding/MTP support. Google documents iOS GPU support for Gemma 4, but the public LiteRT-LM release currently ships an iOS simulator CLI binary rather than an iOS device C API xcframework, so Muninn vendors its own `LiteRTLMEngine.xcframework`.
+
+Build and vendor the runtime from a LiteRT-LM checkout at the pinned tag:
+
+```bash
+git clone https://github.com/google-ai-edge/LiteRT-LM.git /tmp/LiteRT-LM
+git -C /tmp/LiteRT-LM checkout v0.11.0
+scripts/build-litert-lm-ios-xcframework.sh /tmp/LiteRT-LM
+```
+
+The adapter enables speculative decoding when the vendored runtime exposes the `v0.11.0` C API. Older vendored runtimes still load, but diagnostics will show `speculativeDecodingApiAvailable: false`.
 
 ## Local Development
 
