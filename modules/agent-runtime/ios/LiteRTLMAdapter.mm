@@ -2,6 +2,40 @@
 #import "Vendor/LiteRTLM/include/engine.h"
 #include <string.h>
 
+#if defined(__APPLE__)
+#define LITERT_LM_WEAK_IMPORT __attribute__((weak_import))
+#else
+#define LITERT_LM_WEAK_IMPORT
+#endif
+
+extern "C" {
+// LiteRT-LM v0.11.0 split conversation config creation into a no-arg create
+// plus setters, and added MTP/speculative decoding controls. Keep these weak so
+// the current v0.10.x vendored runtime can still link until the xcframework is
+// rebuilt.
+void litert_lm_conversation_config_set_session_config(
+    LiteRtLmConversationConfig *config,
+    const LiteRtLmSessionConfig *session_config) LITERT_LM_WEAK_IMPORT;
+void litert_lm_conversation_config_set_system_message(
+    LiteRtLmConversationConfig *config,
+    const char *system_message_json) LITERT_LM_WEAK_IMPORT;
+void litert_lm_conversation_config_set_tools(
+    LiteRtLmConversationConfig *config,
+    const char *tools_json) LITERT_LM_WEAK_IMPORT;
+void litert_lm_conversation_config_set_messages(
+    LiteRtLmConversationConfig *config,
+    const char *messages_json) LITERT_LM_WEAK_IMPORT;
+void litert_lm_conversation_config_set_enable_constrained_decoding(
+    LiteRtLmConversationConfig *config,
+    bool enable_constrained_decoding) LITERT_LM_WEAK_IMPORT;
+void litert_lm_engine_settings_set_parallel_file_section_loading(
+    LiteRtLmEngineSettings *settings,
+    bool parallel_file_section_loading) LITERT_LM_WEAK_IMPORT;
+void litert_lm_engine_settings_set_enable_speculative_decoding(
+    LiteRtLmEngineSettings *settings,
+    bool enable_speculative_decoding) LITERT_LM_WEAK_IMPORT;
+}
+
 static NSString *const LiteRTLMAdapterErrorDomain = @"AgentRuntimeLiteRTLMAdapter";
 
 typedef NS_ENUM(NSInteger, LiteRTLMAdapterErrorCode) {
@@ -193,6 +227,33 @@ static NSArray<NSString *> *LiteRTLMPreferredBackendsFromRuntimeConfig(
   return [preferredBackends copy];
 }
 
+static NSString * _Nullable LiteRTLMOptionalBackendFromRuntimeConfig(
+    NSDictionary<NSString *, id> *runtimeConfig,
+    NSString *key,
+    NSString * _Nullable fallback) {
+  id rawBackend = runtimeConfig[key];
+  if (rawBackend == NSNull.null) {
+    return nil;
+  }
+  if ([rawBackend isKindOfClass:[NSString class]]) {
+    NSString *backend = [[(NSString *)rawBackend lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return backend.length > 0 ? backend : fallback;
+  }
+
+  return fallback;
+}
+
+static NSString * _Nullable LiteRTLMVisionBackendFromRuntimeConfig(
+    NSDictionary<NSString *, id> *runtimeConfig) {
+  return LiteRTLMOptionalBackendFromRuntimeConfig(runtimeConfig, @"visionBackend", nil);
+}
+
+static NSString * _Nullable LiteRTLMAudioBackendFromRuntimeConfig(
+    NSDictionary<NSString *, id> *runtimeConfig) {
+  return LiteRTLMOptionalBackendFromRuntimeConfig(runtimeConfig, @"audioBackend", nil);
+}
+
 static NSInteger LiteRTLMMaxNumTokensFromRuntimeConfig(
     NSDictionary<NSString *, id> *runtimeConfig) {
   return LiteRTLMPositiveIntegerValue(runtimeConfig[@"maxNumTokens"], 4096);
@@ -206,6 +267,140 @@ static NSInteger LiteRTLMMaxOutputTokensFromRuntimeConfig(
 static BOOL LiteRTLMVerboseNativeLoggingFromRuntimeConfig(
     NSDictionary<NSString *, id> *runtimeConfig) {
   return LiteRTLMBooleanValue(runtimeConfig[@"enableVerboseNativeLogging"], NO);
+}
+
+static BOOL LiteRTLMParallelFileSectionLoadingFromRuntimeConfig(
+    NSDictionary<NSString *, id> *runtimeConfig) {
+  return LiteRTLMBooleanValue(runtimeConfig[@"parallelFileSectionLoading"], YES);
+}
+
+static BOOL LiteRTLMEnableSpeculativeDecodingForBackend(
+    NSDictionary<NSString *, id> *runtimeConfig,
+    NSString *backend) {
+  id rawValue = runtimeConfig[@"enableSpeculativeDecoding"];
+  if ([rawValue isKindOfClass:[NSNumber class]]) {
+    return [(NSNumber *)rawValue boolValue] && [backend isEqualToString:@"gpu"];
+  }
+
+  return [backend isEqualToString:@"gpu"];
+}
+
+static __attribute__((unused)) LiteRtLmConversationConfig *LiteRTLMConversationConfigCreateWithAPI(
+    LiteRtLmConversationConfig *(*createFn)(
+        LiteRtLmEngine *,
+        const LiteRtLmSessionConfig *,
+        const char *,
+        const char *,
+        const char *,
+        bool),
+    LiteRtLmEngine *engine,
+    LiteRtLmSessionConfig *sessionConfig,
+    const char *systemMessageJSON,
+    const char *toolsJSON,
+    const char *messagesJSON,
+    bool enableConstrainedDecoding) {
+  return createFn(
+      engine,
+      sessionConfig,
+      systemMessageJSON,
+      toolsJSON,
+      messagesJSON,
+      enableConstrainedDecoding);
+}
+
+static LiteRtLmConversationConfig *LiteRTLMConversationConfigCreateWithAPI(
+    LiteRtLmConversationConfig *(*createFn)(),
+    LiteRtLmEngine *engine,
+    LiteRtLmSessionConfig *sessionConfig,
+    const char *systemMessageJSON,
+    const char *toolsJSON,
+    const char *messagesJSON,
+    bool enableConstrainedDecoding) {
+  (void)engine;
+  LiteRtLmConversationConfig *config = createFn();
+  if (config == nullptr) {
+    return nullptr;
+  }
+
+  if (sessionConfig != nullptr) {
+    if (litert_lm_conversation_config_set_session_config == nullptr) {
+      litert_lm_conversation_config_delete(config);
+      return nullptr;
+    }
+    litert_lm_conversation_config_set_session_config(config, sessionConfig);
+  }
+  if (systemMessageJSON != nullptr) {
+    if (litert_lm_conversation_config_set_system_message == nullptr) {
+      litert_lm_conversation_config_delete(config);
+      return nullptr;
+    }
+    litert_lm_conversation_config_set_system_message(config, systemMessageJSON);
+  }
+  if (toolsJSON != nullptr) {
+    if (litert_lm_conversation_config_set_tools == nullptr) {
+      litert_lm_conversation_config_delete(config);
+      return nullptr;
+    }
+    litert_lm_conversation_config_set_tools(config, toolsJSON);
+  }
+  if (messagesJSON != nullptr) {
+    if (litert_lm_conversation_config_set_messages == nullptr) {
+      litert_lm_conversation_config_delete(config);
+      return nullptr;
+    }
+    litert_lm_conversation_config_set_messages(config, messagesJSON);
+  }
+  if (enableConstrainedDecoding &&
+      litert_lm_conversation_config_set_enable_constrained_decoding == nullptr) {
+    litert_lm_conversation_config_delete(config);
+    return nullptr;
+  }
+  if (litert_lm_conversation_config_set_enable_constrained_decoding != nullptr) {
+    litert_lm_conversation_config_set_enable_constrained_decoding(
+        config,
+        enableConstrainedDecoding);
+  }
+
+  return config;
+}
+
+static LiteRtLmConversationConfig *LiteRTLMConversationConfigCreate(
+    LiteRtLmEngine *engine,
+    LiteRtLmSessionConfig *sessionConfig,
+    const char *systemMessageJSON,
+    const char *toolsJSON,
+    const char *messagesJSON,
+    bool enableConstrainedDecoding) {
+  return LiteRTLMConversationConfigCreateWithAPI(
+      &litert_lm_conversation_config_create,
+      engine,
+      sessionConfig,
+      systemMessageJSON,
+      toolsJSON,
+      messagesJSON,
+      enableConstrainedDecoding);
+}
+
+template <typename InputDataT>
+static LiteRtLmResponses *LiteRTLMGenerateTextWithAPI(
+    LiteRtLmResponses *(*generateFn)(LiteRtLmSession *, const InputDataT *, size_t),
+    LiteRtLmSession *session,
+    NSString *text) {
+  const char *textBytes = text.UTF8String;
+  InputDataT input = {};
+  input.type = static_cast<decltype(input.type)>(0);
+  input.data = textBytes;
+  input.size = strlen(textBytes);
+  return generateFn(session, &input, 1);
+}
+
+static LiteRtLmResponses *LiteRTLMGenerateText(
+    LiteRtLmSession *session,
+    NSString *text) {
+  return LiteRTLMGenerateTextWithAPI(
+      &litert_lm_session_generate_content,
+      session,
+      text);
 }
 
 static NSDictionary<NSString *, id> *LiteRTLMProbeConversationSend(
@@ -264,11 +459,13 @@ static NSDictionary<NSString *, id> *LiteRTLMProbeConversationSend(
   probe[@"messageJsonLength"] = @(messageJSON.length);
 
   LiteRtLmConversationConfig *conversationConfig =
-      litert_lm_conversation_config_create(
-          engine, sessionConfig,
+      LiteRTLMConversationConfigCreate(
+          engine,
+          sessionConfig,
           systemMessageJSON ? systemMessageJSON.UTF8String : nullptr,
           toolsJSON ? toolsJSON.UTF8String : nullptr,
-          nullptr, false);
+          nullptr,
+          false);
   litert_lm_session_config_delete(sessionConfig);
 
   if (conversationConfig == nullptr) {
@@ -325,14 +522,18 @@ static NSDictionary<NSString *, id> *LiteRTLMProbeConversationSend(
   return probe;
 }
 
-static NSString *LiteRTLMSamplerTypeName(Type samplerType) {
+static constexpr NSInteger LiteRTLMSamplerTypeTopK = 1;
+static constexpr NSInteger LiteRTLMSamplerTypeTopP = 2;
+static constexpr NSInteger LiteRTLMSamplerTypeGreedy = 3;
+
+static NSString *LiteRTLMSamplerTypeName(NSInteger samplerType) {
   switch (samplerType) {
-    case kTopK:
+    case LiteRTLMSamplerTypeTopK:
       return @"top_k";
-    case kGreedy:
+    case LiteRTLMSamplerTypeGreedy:
       return @"greedy";
-    case kTopP:
-    case kTypeUnspecified:
+    case LiteRTLMSamplerTypeTopP:
+    case 0:
     default:
       return @"top_p";
   }
@@ -341,7 +542,7 @@ static NSString *LiteRTLMSamplerTypeName(Type samplerType) {
 static LiteRtLmSamplerParams LiteRTLMSamplerParamsFromRuntimeConfig(
     NSDictionary<NSString *, id> *runtimeConfig) {
   LiteRtLmSamplerParams samplerParams = {};
-  samplerParams.type = kTopP;
+  samplerParams.type = static_cast<decltype(samplerParams.type)>(LiteRTLMSamplerTypeTopP);
   samplerParams.top_k = 1;
   samplerParams.top_p = 0.95f;
   samplerParams.temperature = 1.0f;
@@ -358,11 +559,11 @@ static LiteRtLmSamplerParams LiteRTLMSamplerParamsFromRuntimeConfig(
     NSString *samplerType = [[(NSString *)rawType lowercaseString]
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if ([samplerType isEqualToString:@"top_k"]) {
-      samplerParams.type = kTopK;
+      samplerParams.type = static_cast<decltype(samplerParams.type)>(LiteRTLMSamplerTypeTopK);
     } else if ([samplerType isEqualToString:@"greedy"]) {
-      samplerParams.type = kGreedy;
+      samplerParams.type = static_cast<decltype(samplerParams.type)>(LiteRTLMSamplerTypeGreedy);
     } else {
-      samplerParams.type = kTopP;
+      samplerParams.type = static_cast<decltype(samplerParams.type)>(LiteRTLMSamplerTypeTopP);
     }
   }
 
@@ -381,10 +582,16 @@ static NSDictionary<NSString *, id> *LiteRTLMRuntimeConfigDiagnostics(
   LiteRtLmSamplerParams samplerParams = LiteRTLMSamplerParamsFromRuntimeConfig(runtimeConfig);
   return @{
     @"requestedPreferredBackends": LiteRTLMPreferredBackendsFromRuntimeConfig(runtimeConfig),
+    @"requestedVisionBackend": LiteRTLMVisionBackendFromRuntimeConfig(runtimeConfig) ?: @"none",
+    @"requestedAudioBackend": LiteRTLMAudioBackendFromRuntimeConfig(runtimeConfig) ?: @"none",
     @"requestedMaxNumTokens": @(LiteRTLMMaxNumTokensFromRuntimeConfig(runtimeConfig)),
     @"requestedMaxOutputTokens": @(LiteRTLMMaxOutputTokensFromRuntimeConfig(runtimeConfig)),
+    @"requestedSpeculativeDecoding": runtimeConfig[@"enableSpeculativeDecoding"] ?: @"gpu",
+    @"speculativeDecodingApiAvailable":
+        @(litert_lm_engine_settings_set_enable_speculative_decoding != nullptr),
+    @"parallelFileSectionLoading": @(LiteRTLMParallelFileSectionLoadingFromRuntimeConfig(runtimeConfig)),
     @"requestedSampler": @{
-      @"type": LiteRTLMSamplerTypeName(samplerParams.type),
+      @"type": LiteRTLMSamplerTypeName(static_cast<NSInteger>(samplerParams.type)),
       @"topK": @(samplerParams.top_k),
       @"topP": @(samplerParams.top_p),
       @"temperature": @(samplerParams.temperature),
@@ -396,9 +603,13 @@ static NSDictionary<NSString *, id> *LiteRTLMRuntimeConfigDiagnostics(
 
 static NSString *LiteRTLMEngineConfigSignature(NSDictionary<NSString *, id> *runtimeConfig) {
   NSArray<NSString *> *preferredBackends = LiteRTLMPreferredBackendsFromRuntimeConfig(runtimeConfig);
-  return [NSString stringWithFormat:@"backends=%@|maxTokens=%ld",
+  return [NSString stringWithFormat:@"backends=%@|vision=%@|audio=%@|maxTokens=%ld|speculative=%@|parallelFileLoading=%@",
                                     [preferredBackends componentsJoinedByString:@","],
-                                    (long)LiteRTLMMaxNumTokensFromRuntimeConfig(runtimeConfig)];
+                                    LiteRTLMVisionBackendFromRuntimeConfig(runtimeConfig) ?: @"none",
+                                    LiteRTLMAudioBackendFromRuntimeConfig(runtimeConfig) ?: @"none",
+                                    (long)LiteRTLMMaxNumTokensFromRuntimeConfig(runtimeConfig),
+                                    runtimeConfig[@"enableSpeculativeDecoding"] ?: @"gpu",
+                                    @(LiteRTLMParallelFileSectionLoadingFromRuntimeConfig(runtimeConfig))];
 }
 
 static id _Nullable LiteRTLMParseJSONObjectFromUTF8(const char *jsonCString) {
@@ -451,16 +662,19 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   NSString *_Nullable _loadedModelPath;
   NSString *_Nullable _loadedEngineConfigSignature;
   NSString *_Nullable _loadedBackend;
+  NSString *_Nullable _loadedVisionBackend;
+  NSString *_Nullable _loadedAudioBackend;
   NSNumber *_Nullable _loadedMaxNumTokens;
   NSString *_Nullable _loadedCacheMode;
   NSString *_Nullable _loadedCacheDirectory;
+  NSArray<NSDictionary<NSString *, id> *> *_Nullable _lastLoadAttempts;
 }
 @end
 
 @implementation LiteRTLMAdapter
 
 - (void)dealloc {
-  @synchronized (self) {
+  @synchronized(self) {
     if (_engine != nullptr) {
       litert_lm_engine_delete(_engine);
       _engine = nullptr;
@@ -471,13 +685,12 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
 - (nullable LiteRtLmEngine *)ensureEngineWithModelPath:(NSString *)modelPath
                                          runtimeConfig:(NSDictionary<NSString *, id> *)runtimeConfig
                                           wasColdStart:(BOOL *)wasColdStart
-                                                 error:(NSError * _Nullable * _Nullable)error {
-  @synchronized (self) {
-    NSString *requestedEngineConfigSignature =
-        LiteRTLMEngineConfigSignature(runtimeConfig);
-    const BOOL needsReload = (_engine == nullptr ||
-        ![_loadedModelPath isEqualToString:modelPath] ||
-        ![_loadedEngineConfigSignature isEqualToString:requestedEngineConfigSignature]);
+                                                 error:(NSError *_Nullable *_Nullable)error {
+  @synchronized(self) {
+    NSString *requestedEngineConfigSignature = LiteRTLMEngineConfigSignature(runtimeConfig);
+    const BOOL needsReload =
+        (_engine == nullptr || ![_loadedModelPath isEqualToString:modelPath] ||
+         ![_loadedEngineConfigSignature isEqualToString:requestedEngineConfigSignature]);
     if (wasColdStart != nil) {
       *wasColdStart = needsReload;
     }
@@ -492,13 +705,15 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
       _loadedModelPath = nil;
       _loadedEngineConfigSignature = nil;
       _loadedBackend = nil;
+      _loadedVisionBackend = nil;
+      _loadedAudioBackend = nil;
       _loadedMaxNumTokens = nil;
       _loadedCacheMode = nil;
       _loadedCacheDirectory = nil;
+      _lastLoadAttempts = nil;
     }
 
-    BOOL verboseNativeLogging =
-        LiteRTLMVerboseNativeLoggingFromRuntimeConfig(runtimeConfig);
+    BOOL verboseNativeLogging = LiteRTLMVerboseNativeLoggingFromRuntimeConfig(runtimeConfig);
     if (verboseNativeLogging) {
       NSLog(@"[LiteRTLMAdapter] Loading model from: %@", modelPath);
     }
@@ -508,8 +723,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
         LiteRTLMRuntimeConfigDiagnostics(runtimeConfig);
     NSDictionary<NSString *, id> *modelFileDiagnostics =
         LiteRTLMCollectModelFileDiagnostics(modelPath);
-    NSMutableArray<NSDictionary<NSString *, id> *> *loadAttempts =
-        [NSMutableArray array];
+    NSMutableArray<NSDictionary<NSString *, id> *> *loadAttempts = [NSMutableArray array];
 
     NSString *cacheDirectory =
         [NSTemporaryDirectory() stringByAppendingPathComponent:@"litert-lm-cache"];
@@ -522,41 +736,88 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
 
     NSArray<NSString *> *preferredBackends =
         LiteRTLMPreferredBackendsFromRuntimeConfig(runtimeConfig);
-    NSNumber *configuredMaxNumTokens =
-        @(LiteRTLMMaxNumTokensFromRuntimeConfig(runtimeConfig));
-    NSMutableArray<NSDictionary<NSString *, id> *> *attemptPlans =
-        [NSMutableArray array];
+    NSNumber *configuredMaxNumTokens = @(LiteRTLMMaxNumTokensFromRuntimeConfig(runtimeConfig));
+    NSString *configuredVisionBackend = LiteRTLMVisionBackendFromRuntimeConfig(runtimeConfig);
+    NSString *configuredAudioBackend = LiteRTLMAudioBackendFromRuntimeConfig(runtimeConfig);
+    NSMutableArray<NSDictionary<NSString *, id> *> *attemptPlans = [NSMutableArray array];
+    NSMutableSet<NSString *> *attemptPlanSignatures = [NSMutableSet set];
+    void (^addAttemptPlan)(NSString *, NSNumber *, BOOL, NSString *, NSString *) = ^(
+        NSString *backend, NSNumber *maxNumTokens, BOOL speculativeDecoding, NSString *cacheMode,
+        NSString *attemptCacheDirectory) {
+      NSString *signature = [NSString
+          stringWithFormat:@"%@|%@|%@|%@|%@|%@", backend ?: @"", maxNumTokens ?: @(0),
+                           speculativeDecoding ? @"spec" : @"nospec", cacheMode ?: @"",
+                           configuredVisionBackend ?: @"none", configuredAudioBackend ?: @"none"];
+      if ([attemptPlanSignatures containsObject:signature]) {
+        return;
+      }
+      [attemptPlanSignatures addObject:signature];
+
+      NSMutableDictionary<NSString *, id> *plan = [NSMutableDictionary dictionary];
+      plan[@"backend"] = backend;
+      plan[@"maxNumTokens"] = maxNumTokens;
+      plan[@"speculativeDecoding"] = @(speculativeDecoding);
+      plan[@"cacheMode"] = cacheMode;
+      if (attemptCacheDirectory.length > 0) {
+        plan[@"cacheDirectory"] = attemptCacheDirectory;
+      }
+      plan[@"visionBackend"] = configuredVisionBackend ?: @"none";
+      plan[@"audioBackend"] = configuredAudioBackend ?: @"none";
+      [attemptPlans addObject:plan];
+    };
     if (cacheDirectoryReady) {
       for (NSString *backend in preferredBackends) {
-        [attemptPlans addObject:@{
-          @"backend": backend,
-          @"maxNumTokens": configuredMaxNumTokens,
-          @"cacheMode": @"directory",
-          @"cacheDirectory": cacheDirectory
-        }];
-        [attemptPlans addObject:@{
-          @"backend": backend,
-          @"maxNumTokens": configuredMaxNumTokens,
-          @"cacheMode": @"nocache"
-        }];
+        NSMutableArray<NSNumber *> *maxNumTokenCandidates =
+            [NSMutableArray arrayWithObject:configuredMaxNumTokens];
+        if ([backend isEqualToString:@"gpu"] && configuredMaxNumTokens.integerValue > 4096) {
+          [maxNumTokenCandidates addObject:@4096];
+        }
+        if ([backend isEqualToString:@"gpu"] && configuredMaxNumTokens.integerValue > 3072) {
+          [maxNumTokenCandidates addObject:@3072];
+        }
+        BOOL preferredSpeculativeDecoding =
+            LiteRTLMEnableSpeculativeDecodingForBackend(runtimeConfig, backend);
+        NSArray<NSNumber *> *speculativeDecodingCandidates =
+            preferredSpeculativeDecoding ? @[ @YES, @NO ] : @[ @NO ];
+        for (NSNumber *maxNumTokens in maxNumTokenCandidates) {
+          for (NSNumber *speculativeDecoding in speculativeDecodingCandidates) {
+            addAttemptPlan(backend, maxNumTokens, speculativeDecoding.boolValue, @"directory",
+                           cacheDirectory);
+            addAttemptPlan(backend, maxNumTokens, speculativeDecoding.boolValue, @"nocache", nil);
+          }
+        }
       }
     } else {
       [loadAttempts addObject:@{
-        @"backend": @"*",
-        @"maxNumTokens": configuredMaxNumTokens,
-        @"cacheMode": @"directory",
-        @"cacheDirectory": cacheDirectory,
-        @"engineCreated": @NO,
-        @"skipped": @YES,
-        @"cacheDirectoryError": cacheDirectoryError.localizedDescription ?: @"unknown",
-        @"preferredBackends": preferredBackends
+        @"backend" : @"*",
+        @"maxNumTokens" : configuredMaxNumTokens,
+        @"visionBackend" : configuredVisionBackend ?: @"none",
+        @"audioBackend" : configuredAudioBackend ?: @"none",
+        @"cacheMode" : @"directory",
+        @"cacheDirectory" : cacheDirectory,
+        @"engineCreated" : @NO,
+        @"skipped" : @YES,
+        @"cacheDirectoryError" : cacheDirectoryError.localizedDescription ?: @"unknown",
+        @"preferredBackends" : preferredBackends
       }];
       for (NSString *backend in preferredBackends) {
-        [attemptPlans addObject:@{
-          @"backend": backend,
-          @"maxNumTokens": configuredMaxNumTokens,
-          @"cacheMode": @"nocache"
-        }];
+        NSMutableArray<NSNumber *> *maxNumTokenCandidates =
+            [NSMutableArray arrayWithObject:configuredMaxNumTokens];
+        if ([backend isEqualToString:@"gpu"] && configuredMaxNumTokens.integerValue > 4096) {
+          [maxNumTokenCandidates addObject:@4096];
+        }
+        if ([backend isEqualToString:@"gpu"] && configuredMaxNumTokens.integerValue > 3072) {
+          [maxNumTokenCandidates addObject:@3072];
+        }
+        BOOL preferredSpeculativeDecoding =
+            LiteRTLMEnableSpeculativeDecodingForBackend(runtimeConfig, backend);
+        NSArray<NSNumber *> *speculativeDecodingCandidates =
+            preferredSpeculativeDecoding ? @[ @YES, @NO ] : @[ @NO ];
+        for (NSNumber *maxNumTokens in maxNumTokenCandidates) {
+          for (NSNumber *speculativeDecoding in speculativeDecodingCandidates) {
+            addAttemptPlan(backend, maxNumTokens, speculativeDecoding.boolValue, @"nocache", nil);
+          }
+        }
       }
     }
 
@@ -568,26 +829,33 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
 
     for (NSDictionary<NSString *, id> *attemptPlan in attemptPlans) {
       NSString *backend = attemptPlan[@"backend"];
+      NSString *visionBackend = attemptPlan[@"visionBackend"];
+      if ([visionBackend isEqualToString:@"none"]) {
+        visionBackend = nil;
+      }
+      NSString *audioBackend = attemptPlan[@"audioBackend"];
+      if ([audioBackend isEqualToString:@"none"]) {
+        audioBackend = nil;
+      }
       NSNumber *maxNumTokens = attemptPlan[@"maxNumTokens"];
+      NSNumber *speculativeDecoding = attemptPlan[@"speculativeDecoding"];
       NSString *cacheMode = attemptPlan[@"cacheMode"];
       NSString *attemptCacheDirectory = attemptPlan[@"cacheDirectory"];
 
       LiteRtLmEngineSettings *settings = litert_lm_engine_settings_create(
-          modelPath.fileSystemRepresentation,
-          backend.UTF8String,
-          backend.UTF8String,
-          nullptr);
+          modelPath.fileSystemRepresentation, backend.UTF8String,
+          visionBackend.length > 0 ? visionBackend.UTF8String : nullptr,
+          audioBackend.length > 0 ? audioBackend.UTF8String : nullptr);
       if (settings == nullptr) {
+        _lastLoadAttempts = [loadAttempts copy];
         if (error != nil) {
-          *error = LiteRTLMError(
-              LiteRTLMAdapterErrorModelLoadFailed,
-              @"Failed to create LiteRT-LM engine settings.",
-              @{
-                @"modelPath": modelPath ?: @"",
-                @"runtimeConfig": runtimeConfigDiagnostics,
-                @"modelFileDiagnostics": modelFileDiagnostics,
-                @"loadAttempts": loadAttempts
-              });
+          *error = LiteRTLMError(LiteRTLMAdapterErrorModelLoadFailed,
+                                 @"Failed to create LiteRT-LM engine settings.", @{
+                                   @"modelPath" : modelPath ?: @"",
+                                   @"runtimeConfig" : runtimeConfigDiagnostics,
+                                   @"modelFileDiagnostics" : modelFileDiagnostics,
+                                   @"loadAttempts" : loadAttempts
+                                 });
         }
         return nullptr;
       }
@@ -597,29 +865,51 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
       }
 
       if ([cacheMode isEqualToString:@"directory"]) {
-        litert_lm_engine_settings_set_cache_dir(
-            settings, attemptCacheDirectory.fileSystemRepresentation);
+        litert_lm_engine_settings_set_cache_dir(settings,
+                                                attemptCacheDirectory.fileSystemRepresentation);
       } else {
         litert_lm_engine_settings_set_cache_dir(settings, ":nocache");
       }
 
+      BOOL speculativeDecodingApiAvailable =
+          litert_lm_engine_settings_set_enable_speculative_decoding != nullptr;
+      if (speculativeDecodingApiAvailable) {
+        litert_lm_engine_settings_set_enable_speculative_decoding(settings,
+                                                                  speculativeDecoding.boolValue);
+      }
+
+      BOOL parallelFileSectionLoading =
+          LiteRTLMParallelFileSectionLoadingFromRuntimeConfig(runtimeConfig);
+      BOOL parallelFileSectionLoadingApiAvailable =
+          litert_lm_engine_settings_set_parallel_file_section_loading != nullptr;
+      if (parallelFileSectionLoadingApiAvailable) {
+        litert_lm_engine_settings_set_parallel_file_section_loading(settings,
+                                                                    parallelFileSectionLoading);
+      }
+
       if (verboseNativeLogging) {
-        NSLog(@"[LiteRTLMAdapter] Engine load attempt backend=%@ maxNumTokens=%@ cacheMode=%@",
-              backend,
-              maxNumTokens ?: @(0),
-              cacheMode);
+        NSLog(@"[LiteRTLMAdapter] Engine load attempt backend=%@ vision=%@ audio=%@ "
+              @"maxNumTokens=%@ cacheMode=%@ speculative=%@",
+              backend, visionBackend ?: @"none", audioBackend ?: @"none", maxNumTokens ?: @(0),
+              cacheMode, speculativeDecoding.boolValue ? @"yes" : @"no");
       }
       LiteRtLmEngine *candidate = litert_lm_engine_create(settings);
       litert_lm_engine_settings_delete(settings);
 
-      NSMutableDictionary<NSString *, id> *attemptResult =
-          [attemptPlan mutableCopy];
+      NSMutableDictionary<NSString *, id> *attemptResult = [attemptPlan mutableCopy];
       attemptResult[@"engineCreated"] = @(candidate != nullptr);
+      attemptResult[@"speculativeDecoding"] = @(speculativeDecoding.boolValue);
+      attemptResult[@"speculativeDecodingApiAvailable"] = @(speculativeDecodingApiAvailable);
+      attemptResult[@"parallelFileSectionLoading"] = @(parallelFileSectionLoading);
+      attemptResult[@"parallelFileSectionLoadingApiAvailable"] =
+          @(parallelFileSectionLoadingApiAvailable);
       [loadAttempts addObject:attemptResult];
 
       if (candidate != nullptr) {
         engine = candidate;
         resolvedBackend = [backend copy];
+        _loadedVisionBackend = [visionBackend copy];
+        _loadedAudioBackend = [audioBackend copy];
         resolvedMaxNumTokens = [maxNumTokens copy];
         resolvedCacheMode = [cacheMode copy];
         resolvedCacheDirectory = [attemptCacheDirectory copy];
@@ -628,16 +918,15 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
     }
 
     if (engine == nullptr) {
+      _lastLoadAttempts = [loadAttempts copy];
       if (error != nil) {
-        *error = LiteRTLMError(
-            LiteRTLMAdapterErrorModelLoadFailed,
-            @"LiteRT-LM failed to load the model file.",
-            @{
-              @"modelPath": modelPath ?: @"",
-              @"runtimeConfig": runtimeConfigDiagnostics,
-              @"modelFileDiagnostics": modelFileDiagnostics,
-              @"loadAttempts": loadAttempts
-            });
+        *error = LiteRTLMError(LiteRTLMAdapterErrorModelLoadFailed,
+                               @"LiteRT-LM failed to load the model file.", @{
+                                 @"modelPath" : modelPath ?: @"",
+                                 @"runtimeConfig" : runtimeConfigDiagnostics,
+                                 @"modelFileDiagnostics" : modelFileDiagnostics,
+                                 @"loadAttempts" : loadAttempts
+                               });
       }
       return nullptr;
     }
@@ -653,21 +942,22 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
     _loadedMaxNumTokens = [resolvedMaxNumTokens copy];
     _loadedCacheMode = [resolvedCacheMode copy];
     _loadedCacheDirectory = [resolvedCacheDirectory copy];
+    _lastLoadAttempts = [loadAttempts copy];
     return _engine;
   }
 }
 
-- (NSDictionary<NSString *, id> *)runInferenceWithModelPath:(NSString *)modelPath
-                                              runtimeConfig:(NSDictionary<NSString *, id> *)runtimeConfig
-                                                     prompt:(NSString *)prompt
-                                                       goal:(NSString *)goal
-                                             screenshotPath:(NSString *)screenshotPath
-                                     planningScreenshotPath:(NSString * _Nullable)planningScreenshotPath
-                                                axNodeCount:(NSNumber *)axNodeCount
-                                                      error:(NSError * _Nullable __autoreleasing *)error {
+- (NSDictionary<NSString *, id> *)
+    runInferenceWithModelPath:(NSString *)modelPath
+                runtimeConfig:(NSDictionary<NSString *, id> *)runtimeConfig
+                       prompt:(NSString *)prompt
+                         goal:(NSString *)goal
+               screenshotPath:(NSString *)screenshotPath
+       planningScreenshotPath:(NSString *_Nullable)planningScreenshotPath
+                  axNodeCount:(NSNumber *)axNodeCount
+                        error:(NSError *_Nullable __autoreleasing *)error {
   const CFAbsoluteTime startedAt = CFAbsoluteTimeGetCurrent();
-  BOOL verboseNativeLogging =
-      LiteRTLMVerboseNativeLoggingFromRuntimeConfig(runtimeConfig);
+  BOOL verboseNativeLogging = LiteRTLMVerboseNativeLoggingFromRuntimeConfig(runtimeConfig);
   BOOL coldStart = NO;
 
   LiteRtLmEngine *engine = [self ensureEngineWithModelPath:modelPath
@@ -682,7 +972,12 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
       [LiteRTLMRuntimeConfigDiagnostics(runtimeConfig) mutableCopy];
   runtimeDiagnostics[@"modelPath"] = modelPath ?: @"";
   runtimeDiagnostics[@"backend"] = _loadedBackend ?: @"unknown";
+  runtimeDiagnostics[@"visionBackend"] = _loadedVisionBackend ?: @"none";
+  runtimeDiagnostics[@"audioBackend"] = _loadedAudioBackend ?: @"none";
   runtimeDiagnostics[@"maxNumTokens"] = _loadedMaxNumTokens ?: @(0);
+  runtimeDiagnostics[@"cacheMode"] = _loadedCacheMode ?: @"unknown";
+  runtimeDiagnostics[@"cacheDirectory"] = _loadedCacheDirectory ?: @"";
+  runtimeDiagnostics[@"loadAttempts"] = _lastLoadAttempts ?: @[];
 
   // Validate screenshot file exists.
   if (screenshotPath.length == 0 ||
@@ -886,11 +1181,13 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   // constraint provider symbols. The tools schema still helps the model
   // understand the expected output format via the prompt context.
   LiteRtLmConversationConfig *conversationConfig =
-      litert_lm_conversation_config_create(
-          engine, sessionConfig,
+      LiteRTLMConversationConfigCreate(
+          engine,
+          sessionConfig,
           systemMessageJSON ? systemMessageJSON.UTF8String : nullptr,
           toolsJSON ? toolsJSON.UTF8String : nullptr,
-          nullptr, false);
+          nullptr,
+          false);
   litert_lm_session_config_delete(sessionConfig);
 
   if (conversationConfig == nullptr) {
@@ -1174,12 +1471,10 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
                                               wasColdStart:&coldStart
                                                      error:error];
   if (engine == nullptr) {
-    LiteRTLMLogSmokeTestFailure(@"engine_load",
-                                @"ensureEngineWithModelPath returned null.",
-                                @{
-                                  @"modelPath": modelPath ?: @"",
-                                  @"runtimeConfig": LiteRTLMRuntimeConfigDiagnostics(runtimeConfig)
-                                });
+    LiteRTLMLogSmokeTestFailure(@"engine_load", @"ensureEngineWithModelPath returned null.", @{
+      @"modelPath" : modelPath ?: @"",
+      @"runtimeConfig" : LiteRTLMRuntimeConfigDiagnostics(runtimeConfig)
+    });
     return nil;
   }
 
@@ -1187,9 +1482,12 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
       [LiteRTLMRuntimeConfigDiagnostics(runtimeConfig) mutableCopy];
   runtimeDiagnostics[@"modelPath"] = modelPath ?: @"";
   runtimeDiagnostics[@"backend"] = _loadedBackend ?: @"unknown";
+  runtimeDiagnostics[@"visionBackend"] = _loadedVisionBackend ?: @"none";
+  runtimeDiagnostics[@"audioBackend"] = _loadedAudioBackend ?: @"none";
   runtimeDiagnostics[@"maxNumTokens"] = _loadedMaxNumTokens ?: @(0);
   runtimeDiagnostics[@"cacheMode"] = _loadedCacheMode ?: @"unknown";
   runtimeDiagnostics[@"cacheDirectory"] = _loadedCacheDirectory ?: @"";
+  runtimeDiagnostics[@"loadAttempts"] = _lastLoadAttempts ?: @[];
 
   // Try Conversation API first — it applies the model's chat template
   // (e.g. <start_of_turn>user\n...) automatically. Without this formatting,
@@ -1219,7 +1517,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
     NSLog(@"[LiteRTLMAdapter] Trying Conversation API (engine=%p)", engine);
   }
   LiteRtLmConversationConfig *conversationConfig =
-      litert_lm_conversation_config_create(engine, sessionConfig, nullptr, nullptr, nullptr, false);
+      LiteRTLMConversationConfigCreate(engine, sessionConfig, nullptr, nullptr, nullptr, false);
 
   if (conversationConfig != nullptr) {
     LiteRtLmConversation *conversation =
@@ -1311,12 +1609,7 @@ static NSString * _Nullable LiteRTLMExtractTextFromResponseObject(id responseObj
   if (verboseNativeLogging) {
     NSLog(@"[LiteRTLMAdapter] Session created, generating content");
   }
-  InputData input = {};
-  input.type = kInputText;
-  input.data = trimmedPrompt.UTF8String;
-  input.size = strlen(trimmedPrompt.UTF8String);
-
-  LiteRtLmResponses *responses = litert_lm_session_generate_content(session, &input, 1);
+  LiteRtLmResponses *responses = LiteRTLMGenerateText(session, trimmedPrompt);
   if (responses == nullptr) {
     litert_lm_session_delete(session);
     if (error != nil) {

@@ -26,7 +26,7 @@ shopt -u nullglob
 
 if [[ ${#artifacts[@]} -eq 0 ]]; then
   echo "No .xcframework bundles were found under: $SOURCE_DIR" >&2
-  echo "This repo is pinned for LiteRT-LM v0.10.1, but upstream does not currently publish a consumable iOS SDK artifact in GitHub releases." >&2
+  echo "This repo is pinned for LiteRT-LM v0.11.0, but upstream currently publishes iOS CLI binaries rather than a consumable iOS C API xcframework." >&2
   exit 1
 fi
 

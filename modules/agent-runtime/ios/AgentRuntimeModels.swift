@@ -261,19 +261,26 @@ struct AgentRuntimeLiteRTLMSamplerConfig {
 
 struct AgentRuntimeLiteRTLMRuntimeConfig {
   let preferredBackends: [String]
+  let visionBackend: String?
   let maxNumTokens: Int
   let maxOutputTokens: Int
   let sampler: AgentRuntimeLiteRTLMSamplerConfig
+  let enableSpeculativeDecoding: Bool
   let enableVerboseNativeLogging: Bool
 
   func asDictionary() -> [String: Any] {
-    [
+    var dictionary: [String: Any] = [
       "preferredBackends": preferredBackends,
       "maxNumTokens": NSNumber(value: maxNumTokens),
       "maxOutputTokens": NSNumber(value: maxOutputTokens),
       "sampler": sampler.asDictionary(),
+      "enableSpeculativeDecoding": NSNumber(value: enableSpeculativeDecoding),
       "enableVerboseNativeLogging": enableVerboseNativeLogging
     ]
+    if let visionBackend {
+      dictionary["visionBackend"] = visionBackend
+    }
+    return dictionary
   }
 }
 
@@ -318,11 +325,12 @@ struct AgentRuntimeAllowlistedModel {
     id: "gemma-4-e2b-it",
     displayName: "Gemma 4 E2B",
     modelId: "litert-community/gemma-4-E2B-it-litert-lm",
-    commitHash: "ba27655a791cd872631e8cd9c3521d0a433ba9bf",
+    commitHash: "b4f4f4df93418ddb4aa7da8bf33b584602a5b9f8",
     filename: "gemma-4-E2B-it.litertlm",
-    approximateSizeBytes: 2_583_085_056,
+    approximateSizeBytes: 2_588_147_712,
     liteRTLMRuntimeConfig: AgentRuntimeLiteRTLMRuntimeConfig(
-      preferredBackends: ["cpu", "gpu"],
+      preferredBackends: ["gpu", "cpu"],
+      visionBackend: "cpu",
       maxNumTokens: 6144,
       maxOutputTokens: 1024,
       sampler: AgentRuntimeLiteRTLMSamplerConfig(
@@ -332,6 +340,7 @@ struct AgentRuntimeAllowlistedModel {
         temperature: 1.0,
         seed: 0
       ),
+      enableSpeculativeDecoding: true,
       enableVerboseNativeLogging: true
     )
   )
